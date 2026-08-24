@@ -1,0 +1,6 @@
+{
+  "name": "react-devtools-core",
+  "version": "6.1.2",
+  "type": "module",
+  "main": "index.js"
+}
