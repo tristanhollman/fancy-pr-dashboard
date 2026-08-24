@@ -8,12 +8,12 @@
         "ink": "^7.1.1",
         "ink-text-input": "^6.0.0",
         "react": "^19.2.8",
-        "react-devtools-core": "file:./stubs/react-devtools-core",
       },
       "devDependencies": {
         "@types/bun": "latest",
         "@types/react": "^19.2.18",
         "ink-testing-library": "^4.0.0",
+        "react-devtools-core": "file:./stubs/react-devtools-core",
       },
       "peerDependencies": {
         "typescript": "^5",
@@ -116,6 +116,8 @@
     "ws": ["ws@8.21.3", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw=="],
 
     "yoga-layout": ["yoga-layout@3.2.1", "", {}, "sha512-0LPOt3AxKqMdFBZA3HBAt/t/8vIKq7VaQYbuA8WxCgung+p9TVyKRYdpvCb80HcdTN2NkbIKbhNwKUfm3tQywQ=="],
+
+    "ink/react-devtools-core": ["react-devtools-core@file:stubs/react-devtools-core", {}],
 
     "ink-text-input/type-fest": ["type-fest@4.41.0", "", {}, "sha512-TeTSQ6H5YHvpqVwBRcnLDCBnDOHWYu7IvGbHT6N8AOymcr9PJGjc1GTtiWZTYg0NCgYwvnYWEkVChQAr9bjfwA=="],
   }

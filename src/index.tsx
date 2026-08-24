@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Box, Text, render, useApp, useInput, useWindowSize} from 'ink';
 import {

@@ -3,10 +3,21 @@
   "type": "module",
   "private": true,
   "license": "MIT",
+  "description": "Terminal dashboard for open Azure DevOps pull requests.",
+  "version": "0.1.0",
+  "bin": {
+    "fpr": "./src/index.tsx"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
   "devDependencies": {
     "@types/bun": "latest",
     "@types/react": "^19.2.18",
-    "ink-testing-library": "^4.0.0"
+    "ink-testing-library": "^4.0.0",
+    "react-devtools-core": "file:./stubs/react-devtools-core"
   },
   "peerDependencies": {
     "typescript": "^5"
@@ -14,13 +25,7 @@
   "dependencies": {
     "ink": "^7.1.1",
     "ink-text-input": "^6.0.0",
-    "react": "^19.2.8",
-    "react-devtools-core": "file:./stubs/react-devtools-core"
-  },
-  "description": "Terminal dashboard for open Azure DevOps pull requests.",
-  "version": "0.0.0",
-  "bin": {
-    "fpr": "./src/index.tsx"
+    "react": "^19.2.8"
   },
   "scripts": {
     "dev": "bun run src/index.tsx",
