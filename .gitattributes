@@ -1,0 +1,6 @@
+# One canonical line ending in the repo and in every working copy. Without this, a
+# Windows checkout converts to CRLF and every file looks modified on a Linux clone.
+* text=auto eol=lf
+
+# Never touch the compiled binaries.
+*.exe binary

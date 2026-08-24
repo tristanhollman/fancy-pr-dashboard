@@ -12,14 +12,16 @@ and **Created by You**.
 
 ## Install
 
-Grab `fpr.exe` from a release and put it somewhere on your `PATH`. No runtime to
-install — the Bun runtime is baked into the binary.
+Grab the binary for your platform from a release and put it somewhere on your `PATH`.
+No runtime to install — the Bun runtime is baked in (which is also why it is ~115 MB).
 
 Building it yourself:
 
 ```sh
 bun install
-bun run build     # produces ./fpr.exe
+bun run build            # ./fpr (or ./fpr.exe on Windows) for the machine you are on
+bun run build:windows    # cross-compile ./fpr.exe
+bun run build:linux      # cross-compile ./fpr-linux-x64
 ```
 
 ## Usage

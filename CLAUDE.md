@@ -10,7 +10,7 @@ bun install
 bun run dev        # run the app
 bun test           # unit tests
 bun run typecheck  # tsc --noEmit
-bun run build      # compile ./fpr.exe
+bun run build      # compile a binary for the current platform (build:windows / build:linux cross-compile)
 ```
 
 Bun, never npm/node/npx. Bun runs the TypeScript directly — do not add a build step,

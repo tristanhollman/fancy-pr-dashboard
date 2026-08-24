@@ -36,3 +36,5 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # build output
 fpr
 fpr.exe
+fpr-linux-x64
+fpr-darwin-arm64

@@ -25,7 +25,9 @@
   "scripts": {
     "dev": "bun run src/index.tsx",
     "test": "bun test",
-    "build": "bun build --compile --target=bun-windows-x64 ./src/index.tsx --outfile fpr.exe",
+    "build": "bun build --compile ./src/index.tsx --outfile fpr",
+    "build:windows": "bun build --compile --target=bun-windows-x64 ./src/index.tsx --outfile fpr.exe",
+    "build:linux": "bun build --compile --target=bun-linux-x64 ./src/index.tsx --outfile fpr-linux-x64",
     "typecheck": "bunx tsc --noEmit"
   }
 }
