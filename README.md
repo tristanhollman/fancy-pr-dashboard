@@ -6,6 +6,9 @@ question fast: *what needs my review right now?*
 Three sections: **To Review** (PRs where your team is a reviewer), **Assigned to You**,
 and **Created by You**.
 
+The terminal tab is renamed to the live counts (`fpr · 5 to review · 1 mine`) and put
+back the way it was on exit.
+
 > **Status: usable.** Config, the Azure DevOps client, reviewer classification, the
 > settings screen, the three sections, keyboard navigation and the filters all work.
 > Auto-refresh and `az` CLI auth do not yet — see [Roadmap](#roadmap).

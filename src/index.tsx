@@ -14,6 +14,7 @@ import {flattenSections, nextSectionStart, sectionStarts, splitSections} from '.
 import {loadConfig, saveConfig, type Config} from './config.ts';
 import Dashboard, {COLORS, type FileCounts} from './Dashboard.tsx';
 import Settings from './Settings.tsx';
+import {formatTitle, popTitle, pushTitle, setTitle} from './title.ts';
 
 interface Snapshot {
   loading: boolean;
@@ -94,6 +95,13 @@ function App({initialConfig, startInSettings}: {initialConfig: Config; startInSe
     () => (snapshot.prs && snapshot.me ? splitSections(snapshot.prs, config, snapshot.me) : undefined),
     [snapshot.prs, snapshot.me, config],
   );
+
+  // The tab title tracks whatever is on screen; the settings screen names itself so a
+  // half-configured fpr does not sit there claiming zero PRs.
+  useEffect(() => {
+    if (screen === 'settings') setTitle('fpr · settings');
+    else if (sections) setTitle(formatTitle(sections));
+  }, [screen, sections]);
 
   const toggle = (key: FilterKey) => {
     const next: Config = {...config, ui: {...config.ui, [key]: !config.ui[key]}};
@@ -217,8 +225,12 @@ const {config, valid, error} = await loadConfig();
 
 if (process.stdout.isTTY) {
   // Alternate screen: fullscreen at any content size, and the terminal's scrollback is
-  // handed back untouched on exit — same mechanism vim and htop use.
-  render(<App initialConfig={config} startInSettings={!valid} />, {alternateScreen: true});
+  // handed back untouched on exit — same mechanism vim and htop use. The title stack is the
+  // same idea for the tab name, so quitting leaves the terminal as fpr found it.
+  pushTitle();
+  const app = render(<App initialConfig={config} startInSettings={!valid} />, {alternateScreen: true});
+  await app.waitUntilExit();
+  popTitle();
 } else {
   // Piped or redirected: no Ink, no raw mode. Dump JSON instead.
   if (!valid) {
