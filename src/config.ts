@@ -15,8 +15,14 @@ export interface Config {
   repos: string[];
   auth: {
     mode: AuthMode;
-    /** null when using az-cli or when the PAT comes from FPR_PAT */
+    /** null when there is nothing stored: az-cli mode, or the PAT comes from FPR_PAT. */
     pat: string | null;
+    /**
+     * az-cli only. Entra tenant id to issue the token for; null lets az use the tenant of
+     * the active subscription, which is right unless the organization is backed by a
+     * different one (a guest or consultant account).
+     */
+    tenant: string | null;
   };
   team: {
     mode: TeamMode;
@@ -54,7 +60,7 @@ export function defaultConfig(): Config {
     org: '',
     projects: [],
     repos: ['all'],
-    auth: {mode: 'pat', pat: null},
+    auth: {mode: 'pat', pat: null, tenant: null},
     team: {mode: 'manual', groupDescriptor: null, groupDisplayName: null, members: []},
     ui: {
       hideReviewed: false,
@@ -89,6 +95,7 @@ export function isValid(config: Config): boolean {
   if (config.version !== CONFIG_VERSION) return false;
   if (!config.org.trim()) return false;
   if (config.projects.length === 0) return false;
+  // az-cli carries no stored credential; whether the login works is a live check.
   if (config.auth.mode === 'az-cli') return true;
   return Boolean(effectivePat(config));
 }
@@ -146,6 +153,7 @@ export function normalize(raw: unknown): Config {
     auth: {
       mode: auth.mode === 'az-cli' ? 'az-cli' : 'pat',
       pat: typeof auth.pat === 'string' && auth.pat.length > 0 ? auth.pat : null,
+      tenant: typeof auth.tenant === 'string' && auth.tenant.trim().length > 0 ? auth.tenant.trim() : null,
     },
     team: {
       mode: team.mode === 'group' ? 'group' : 'manual',

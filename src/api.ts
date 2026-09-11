@@ -1,4 +1,8 @@
+import {getAzAccessToken, resetAzTokenCache} from './azcli.ts';
 import {effectivePat, type Config} from './config.ts';
+import {ApiError} from './errors.ts';
+
+export {ApiError} from './errors.ts';
 
 const API_VERSION = '7.1';
 /** connectionData is only published as a preview API; `7.1` gets "version out of range". */
@@ -42,20 +46,13 @@ export interface Identity {
   uniqueName: string;
 }
 
-export class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'ApiError';
-  }
-}
-
-/** Never returns or embeds the PAT itself — only the header value, which is never logged. */
-function authHeader(config: Config): string {
+/**
+ * Never returns or embeds the credential itself — only the header value, which is never
+ * logged. A PAT is basic auth with an empty username; an az token is a bearer token.
+ */
+async function authHeader(config: Config): Promise<string> {
   if (config.auth.mode === 'az-cli') {
-    throw new ApiError(0, 'az-cli auth is not implemented yet — use a PAT for now');
+    return `Bearer ${await getAzAccessToken(config.auth.tenant)}`;
   }
   // Trimmed: a token pasted with a stray newline or space authenticates as garbage.
   const pat = effectivePat(config)?.trim();
@@ -65,10 +62,16 @@ function authHeader(config: Config): string {
   return `Basic ${btoa(`:${pat}`)}`;
 }
 
-function describe(status: number): string {
+function describe(status: number, config: Config): string {
+  const az = config.auth.mode === 'az-cli';
   if (status === 401)
-    return 'authentication rejected — the PAT may be expired, scoped to a different organization, or blocked by an org PAT policy';
-  if (status === 403) return 'access denied — the PAT needs the Code: Read scope';
+    return az
+      ? 'authentication rejected — the az login may have expired, or the token was issued for the wrong Entra tenant; run `az login`, and set the tenant in settings if this organization lives in another one'
+      : 'authentication rejected — the PAT may be expired, scoped to a different organization, or blocked by an org PAT policy';
+  if (status === 403)
+    return az
+      ? 'access denied — this az identity cannot read code in this organization'
+      : 'access denied — the PAT needs the Code: Read scope';
   if (status === 404) return 'not found — check the organization and project names';
   if (status === 400) return 'Azure DevOps rejected the request';
   if (status === 429) return 'rate limited by Azure DevOps — try again in a moment';
@@ -103,21 +106,28 @@ async function detail(response: Response): Promise<string> {
 }
 
 async function apiFetch<T>(url: string, config: Config): Promise<T> {
+  // Resolved outside the try so an auth failure is not reported as a network failure.
+  const authorization = await authHeader(config);
+
   let response: Response;
   try {
     response = await fetch(url, {
-      headers: {Authorization: authHeader(config), Accept: 'application/json'},
+      headers: {Authorization: authorization, Accept: 'application/json'},
     });
   } catch (error) {
     // Network-level failure: message comes from fetch, never from our headers.
     throw new ApiError(0, `could not reach Azure DevOps (${error instanceof Error ? error.message : 'network error'})`);
   }
 
+  // An az token can expire mid-session; drop it so a retry fetches a fresh one.
+  if ((response.status === 401 || response.status === 203) && config.auth.mode === 'az-cli') resetAzTokenCache();
+
   // Azure DevOps answers a rejected token with 203 and a sign-in page, not a 401.
-  if (response.status === 203) throw new ApiError(401, describe(401));
+  if (response.status === 203) throw new ApiError(401, describe(401, config));
   if (!response.ok) {
     const explanation = await detail(response);
-    throw new ApiError(response.status, explanation ? `${describe(response.status)} — ${explanation}` : describe(response.status));
+    const reason = describe(response.status, config);
+    throw new ApiError(response.status, explanation ? `${reason} — ${explanation}` : reason);
   }
 
   // An HTML body with a 200 means the org name resolved to a sign-in page, not an API.

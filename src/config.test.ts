@@ -115,12 +115,19 @@ test('normalize repairs wrong types and drops junk entries', () => {
   expect(config.org).toBe('myorg');
   expect(config.projects).toEqual(['platform', 'payments']);
   expect(config.repos).toEqual(['all']);
-  expect(config.auth).toEqual({mode: 'pat', pat: null});
+  expect(config.auth).toEqual({mode: 'pat', pat: null, tenant: null});
   expect(config.team.mode).toBe('group');
   expect(config.team.members).toEqual(['bob@co.com']);
   expect(config.ui.hideReviewed).toBe(false);
   expect(config.ui.refreshSeconds).toBe(15); // floored
   expect(config.ui.dedupeAssignedFromTeamSection).toBe(true);
+});
+
+test('the az tenant is trimmed, and a blank one is stored as no tenant at all', () => {
+  expect(normalize({auth: {mode: 'az-cli', tenant: '  contoso-tenant-id  '}}).auth.tenant).toBe('contoso-tenant-id');
+  expect(normalize({auth: {mode: 'az-cli', tenant: '   '}}).auth.tenant).toBeNull();
+  expect(normalize({auth: {mode: 'az-cli', tenant: 42}}).auth.tenant).toBeNull();
+  expect(normalize({auth: {mode: 'az-cli'}}).auth.tenant).toBeNull();
 });
 
 test('refresh interval floors at 15 seconds', () => {

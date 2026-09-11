@@ -2,6 +2,7 @@ import React, {useMemo, useRef, useState} from 'react';
 import {Box, Text, useInput} from 'ink';
 import TextInput from 'ink-text-input';
 import {getMe, listActivePullRequests, resetIdentityCache, ApiError} from './api.ts';
+import {getAzAccessToken, resetAzTokenCache} from './azcli.ts';
 import {discoverReviewerGroups, type ReviewerGroup} from './classify.ts';
 import {clampRefresh, isValid, patFromEnv, saveConfig, type Config} from './config.ts';
 import {COLORS} from './Dashboard.tsx';
@@ -16,15 +17,24 @@ export type Validator = (config: Config) => Promise<ValidationFailure | null>;
 
 /** The real check: resolve the identity, then ask each project for a single PR. */
 export const validateLive: Validator = async config => {
+  resetIdentityCache();
+
   if (config.auth.mode === 'az-cli') {
-    return {field: 'auth.mode', message: 'az-cli auth is not implemented yet — use a PAT for now'};
+    // Probed first so "az is missing" / "run az login" lands on the mode field rather
+    // than reading as a rejected credential.
+    resetAzTokenCache();
+    try {
+      await getAzAccessToken(config.auth.tenant);
+    } catch (error) {
+      return {field: 'auth.mode', message: error instanceof ApiError ? error.message : String(error)};
+    }
   }
+
   try {
-    resetIdentityCache();
     await getMe(config);
   } catch (error) {
     // A 404 here is the organization, not the token — connectionData needs no extra scope.
-    const field = error instanceof ApiError && error.status === 404 ? 'org' : 'auth.pat';
+    const field = error instanceof ApiError && error.status === 404 ? 'org' : credentialField(config);
     return {field, message: error instanceof ApiError ? error.message : String(error)};
   }
   try {
@@ -34,6 +44,11 @@ export const validateLive: Validator = async config => {
   }
   return null;
 };
+
+/** The field an authentication failure belongs to, which differs per auth mode. */
+function credentialField(config: Config): string {
+  return config.auth.mode === 'az-cli' ? 'auth.mode' : 'auth.pat';
+}
 
 export type GroupFinder = (config: Config) => Promise<ReviewerGroup[]>;
 
@@ -107,12 +122,16 @@ function fieldsFor(draft: Config): Field[] {
       label: 'mode',
       kind: 'toggle',
       value: draft.auth.mode,
-      hint: 'pat | az-cli',
+      hint: draft.auth.mode === 'az-cli' ? 'pat | az-cli · uses your `az login`' : 'pat | az-cli',
       toggle: d => {
         d.auth.mode = d.auth.mode === 'pat' ? 'az-cli' : 'pat';
       },
     },
-    {
+  ];
+
+  // In az-cli mode there is no token to type; any stored PAT is kept for a switch back.
+  if (draft.auth.mode === 'pat') {
+    fields.push({
       key: 'auth.pat',
       group: 'Auth',
       label: 'personal access token',
@@ -123,7 +142,23 @@ function fieldsFor(draft: Config): Field[] {
       set: (d, next) => {
         d.auth.pat = next.length > 0 ? next : null;
       },
-    },
+    });
+  } else {
+    fields.push({
+      key: 'auth.tenant',
+      group: 'Auth',
+      label: 'tenant',
+      kind: 'text',
+      value: draft.auth.tenant ?? '',
+      hint: 'optional; only if this org lives in another Entra tenant than your default az subscription',
+      set: (d, next) => {
+        const trimmed = next.trim();
+        d.auth.tenant = trimmed.length > 0 ? trimmed : null;
+      },
+    });
+  }
+
+  fields.push(
     {
       key: 'team.mode',
       group: 'Team',
@@ -135,7 +170,7 @@ function fieldsFor(draft: Config): Field[] {
         d.team.mode = d.team.mode === 'manual' ? 'group' : 'manual';
       },
     },
-  ];
+  );
 
   if (draft.team.mode === 'manual') {
     fields.push({

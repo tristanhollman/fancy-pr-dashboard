@@ -309,3 +309,106 @@ test('the picker says so when no group reviews anything', async () => {
 
   unmount();
 });
+
+test('switching to az-cli swaps the token field for the tenant field', async () => {
+  const {lastFrame, stdin, unmount} = render(
+    <Settings config={usableConfig()} onSave={() => {}} validate={async () => null} save={async () => {}} />,
+  );
+
+  expect(lastFrame()).toContain('personal access token');
+  expect(lastFrame()).not.toContain('tenant');
+
+  stdin.write(TAB); // Auth group → mode
+  stdin.write(ENTER); // pat → az-cli
+  await settle();
+
+  const frame = lastFrame() ?? '';
+  expect(frame).toContain('az-cli');
+  expect(frame).toContain('tenant');
+  expect(frame).not.toContain('personal access token');
+
+  stdin.write(ENTER); // back to pat
+  await settle();
+  expect(lastFrame()).toContain('personal access token');
+  expect(lastFrame()).not.toContain('tenant');
+
+  unmount();
+});
+
+test('a tenant typed into settings is trimmed', async () => {
+  let saved: Config | undefined;
+  const config = usableConfig();
+  config.auth.mode = 'az-cli';
+  config.auth.pat = null;
+
+  const {stdin, unmount} = render(
+    <Settings
+      config={config}
+      onSave={next => {
+        saved = next;
+      }}
+      validate={async () => null}
+      save={async () => {}}
+    />,
+  );
+
+  stdin.write(TAB); // Auth group → mode
+  await settle();
+  stdin.write('j'); // → tenant
+  await settle();
+  stdin.write(ENTER); // edit
+  await settle();
+  stdin.write('  contoso-tenant-id  ');
+  await settle();
+  stdin.write(ENTER); // commit
+  await settle();
+  stdin.write(CTRL_S);
+  await settle();
+
+  expect(saved?.auth.tenant).toBe('contoso-tenant-id');
+
+  unmount();
+});
+
+test('an az-cli config saves without a PAT', async () => {
+  let saved: Config | undefined;
+  const config = usableConfig();
+  config.auth.mode = 'az-cli';
+  config.auth.pat = null;
+
+  const {stdin, unmount} = render(
+    <Settings
+      config={config}
+      onSave={next => {
+        saved = next;
+      }}
+      validate={async () => null}
+      save={async () => {}}
+    />,
+  );
+
+  stdin.write(CTRL_S);
+  await settle();
+
+  expect(saved?.auth.mode).toBe('az-cli');
+  expect(saved?.auth.pat).toBeNull();
+
+  unmount();
+});
+
+test('an az failure is pinned to the auth mode field, not to the PAT', async () => {
+  const failure: ValidationFailure = {field: 'auth.mode', message: 'not signed in to the az CLI — run `az login`, then try again'};
+  const config = usableConfig();
+  config.auth.mode = 'az-cli';
+
+  const {lastFrame, stdin, unmount} = render(
+    <Settings config={config} onSave={() => {}} validate={async () => failure} save={async () => {}} />,
+  );
+
+  stdin.write(CTRL_S);
+  await settle();
+
+  expect(lastFrame()).toContain('az login');
+
+  unmount();
+});

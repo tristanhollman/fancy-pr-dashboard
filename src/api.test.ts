@@ -1,5 +1,6 @@
 import {afterEach, beforeEach, expect, test} from 'bun:test';
 import {ApiError, getChangedFileCount, getMe, listActivePullRequests, resetIdentityCache, type TaggedPullRequest} from './api.ts';
+import {resetAzTokenCache, setAzRunner} from './azcli.ts';
 import {defaultConfig, type Config} from './config.ts';
 
 const realFetch = globalThis.fetch;
@@ -41,15 +42,38 @@ const CONNECTION_DATA = {
   },
 };
 
+/** An az-cli config plus a stubbed az that hands out `token`. */
+function azConfig(token = 'az-token-not-real'): Config {
+  const c = config();
+  c.auth.mode = 'az-cli';
+  c.auth.pat = null;
+  setAzRunner(async (_resource, tenant) => {
+    azTenants.push(tenant);
+    return {
+      exitCode: 0,
+      stdout: JSON.stringify({accessToken: token, expires_on: Math.floor(Date.now() / 1000) + 3600}),
+      stderr: '',
+    };
+  });
+  return c;
+}
+
+/** Tenants az was asked for, in order. */
+let azTenants: Array<string | null> = [];
+
 beforeEach(() => {
   calls = [];
+  azTenants = [];
   resetIdentityCache();
+  resetAzTokenCache();
   delete process.env.FPR_PAT;
 });
 
 afterEach(() => {
   globalThis.fetch = realFetch;
   resetIdentityCache();
+  resetAzTokenCache();
+  setAzRunner();
   if (savedEnvPat === undefined) delete process.env.FPR_PAT;
   else process.env.FPR_PAT = savedEnvPat;
 });
@@ -101,13 +125,86 @@ test('a 401 explains the plausible causes without echoing the token', async () =
   expect(error.message).not.toContain('token-not-real');
 });
 
-test('az-cli mode fails loudly instead of sending an unauthenticated request', async () => {
+test('az-cli mode sends the az token as a bearer token, and ignores any stored PAT', async () => {
+  stubFetch(() => ({body: CONNECTION_DATA}));
+
+  const c = azConfig();
+  c.auth.pat = 'stored-pat-not-real';
+  await getMe(c);
+
+  expect(calls[0]?.authorization).toBe('Bearer az-token-not-real');
+  expect(calls[0]?.authorization).not.toContain('stored-pat-not-real');
+});
+
+test('az-cli mode ignores FPR_PAT — the mode, not the environment, picks the credential', async () => {
+  stubFetch(() => ({body: CONNECTION_DATA}));
+  process.env.FPR_PAT = 'env-token-not-real';
+
+  await getMe(azConfig());
+
+  expect(calls[0]?.authorization).toBe('Bearer az-token-not-real');
+});
+
+test('a failing az never reaches the network', async () => {
   stubFetch(() => ({body: CONNECTION_DATA}));
 
   const c = config();
   c.auth.mode = 'az-cli';
-  await expect(getMe(c)).rejects.toThrow('az-cli auth is not implemented yet');
+  setAzRunner(async () => ({exitCode: 1, stdout: '', stderr: "ERROR: Please run 'az login'"}));
+
+  await expect(getMe(c)).rejects.toThrow('az login');
   expect(calls).toHaveLength(0);
+});
+
+test('a rejected az token is dropped so the next attempt re-runs az', async () => {
+  stubFetch(() => ({status: 401, body: {}}));
+
+  let issued = 0;
+  const c = config();
+  c.auth.mode = 'az-cli';
+  setAzRunner(async () => ({
+    exitCode: 0,
+    stdout: JSON.stringify({accessToken: `az-token-${++issued}`, expires_on: Math.floor(Date.now() / 1000) + 3600}),
+    stderr: '',
+  }));
+
+  await expect(getMe(c)).rejects.toThrow(ApiError);
+  await expect(getMe(c)).rejects.toThrow(ApiError);
+
+  expect(calls.map(call => call.authorization)).toEqual(['Bearer az-token-1', 'Bearer az-token-2']);
+});
+
+test('the configured tenant reaches az, and is otherwise left to az', async () => {
+  stubFetch(() => ({body: CONNECTION_DATA}));
+
+  await getMe(azConfig());
+  expect(azTenants).toEqual([null]);
+
+  resetIdentityCache();
+  resetAzTokenCache();
+  const c = azConfig();
+  c.auth.tenant = 'contoso-tenant-id';
+  await getMe(c);
+  expect(azTenants).toEqual([null, 'contoso-tenant-id']);
+});
+
+test('a 401 in az-cli mode blames the login, not a PAT', async () => {
+  stubFetch(() => ({status: 401, body: {}}));
+
+  const failure = (await getMe(azConfig()).catch((error: unknown) => error)) as ApiError;
+  expect(failure.message).toContain('az login');
+  // The other thing a 401 means here: a valid token for the wrong Entra tenant.
+  expect(failure.message).toContain('tenant');
+  expect(failure.message).not.toContain('PAT');
+});
+
+test('a 403 in az-cli mode does not suggest changing a PAT scope', async () => {
+  stubFetch(() => ({status: 403, body: {}}));
+
+  const failure = (await getMe(azConfig()).catch((error: unknown) => error)) as ApiError;
+  expect(failure.status).toBe(403);
+  expect(failure.message).toContain('az identity');
+  expect(failure.message).not.toContain('Code: Read');
 });
 
 test('a missing PAT never reaches the network', async () => {

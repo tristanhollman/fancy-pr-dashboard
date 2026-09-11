@@ -10,6 +10,7 @@ import {
   type Identity,
   type TaggedPullRequest,
 } from './api.ts';
+import {resetAzTokenCache} from './azcli.ts';
 import {flattenSections, nextSectionStart, sectionStarts, splitSections} from './classify.ts';
 import {loadConfig, saveConfig, type Config} from './config.ts';
 import Dashboard, {COLORS, type FileCounts} from './Dashboard.tsx';
@@ -182,7 +183,9 @@ function App({initialConfig, startInSettings}: {initialConfig: Config; startInSe
       <Settings
         config={config}
         onSave={next => {
+          // The credential may have changed along with the mode, so neither cache survives.
           resetIdentityCache();
+          resetAzTokenCache();
           setConfig(next);
           setConfigured(true);
           setScreen('dashboard');

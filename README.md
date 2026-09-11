@@ -9,9 +9,9 @@ and **Created by You**.
 The terminal tab is renamed to the live counts (`fpr · 5 to review · 1 mine`) and put
 back the way it was on exit.
 
-> **Status: usable.** Config, the Azure DevOps client, reviewer classification, the
-> settings screen, the three sections, keyboard navigation and the filters all work.
-> Auto-refresh and `az` CLI auth do not yet — see [Roadmap](#roadmap).
+> **Status: usable.** Config, both auth modes, the Azure DevOps client, reviewer
+> classification, the settings screen, the three sections, keyboard navigation and the
+> filters all work. Auto-refresh does not yet — see [Roadmap](#roadmap).
 
 ## Install
 
@@ -92,9 +92,32 @@ Draft PRs and PRs from bot authors are hidden by default (`ui.hideDrafts`, `ui.h
 substring, so `Build Bot` also catches `Build Bot (CI)`. Both filters apply to
 every section, including your own drafts.
 
-Auth is either a Personal Access Token (needs **Code: Read** scope) or your existing
-`az` CLI login. Set `FPR_PAT` in your environment to keep the token out of the config
-file; when it is set, it wins and the settings screen shows the PAT field as read-only.
+### Auth
+
+Two modes, chosen by `auth.mode` on the settings screen.
+
+**`pat`** — a Personal Access Token with the **Code: Read** scope. Set `FPR_PAT` in
+your environment to keep the token out of the config file; when it is set, it wins over
+the stored one and the settings screen shows the PAT field as read-only. Otherwise the
+token lives in the config file, which is written `0600`.
+
+**`az-cli`** — your existing `az login`. No token to paste and nothing secret on disk:
+`fpr` asks the az CLI for a short-lived Azure DevOps access token (`az account
+get-access-token`) and refreshes it a few minutes before it expires. Needs the az CLI on
+your `PATH` and a login that can read code in the organization; if the login has expired,
+`fpr` says so and `az login` fixes it. In this mode the PAT field disappears and `FPR_PAT`
+is ignored — a stored PAT is kept, untouched, in case you switch back.
+
+`auth.tenant` is optional and almost always stays empty: az issues the token for whichever
+Entra tenant your active subscription belongs to, which is the right one. Set it when the
+organization is backed by a *different* tenant than that default — a guest or consultant
+account — where az otherwise returns a perfectly valid token that Azure DevOps answers
+with a 401. `az account list --query "[].{name:name, tenant:tenantId}" -o table` lists the
+ones you are signed in to.
+
+The resource id `fpr` asks for a token against is Azure DevOps' first-party application in
+Entra ID. It is a fixed, Microsoft-owned GUID, identical in every tenant — the az CLI's own
+`azure-devops` extension hardcodes the same one — so it is a constant, not a setting.
 
 ### Piping
 
@@ -119,6 +142,8 @@ bun run typecheck  # tsc --noEmit
 src/index.tsx      entry point: dashboard, settings, or JSON when not a TTY
 src/config.ts      config load/save (atomic, 0600, FPR_PAT override)
 src/api.ts         Azure DevOps REST calls over fetch
+src/azcli.ts       az CLI access tokens for `auth.mode: az-cli` (cached until expiry)
+src/errors.ts      ApiError, shared by the client and the auth backends
 src/classify.ts    reviewer classification and section split (pure, unit-tested)
 src/Settings.tsx   settings screen
 src/Dashboard.tsx  the three sections, plus the colour tokens
@@ -151,8 +176,8 @@ would add weight for a feature this app never uses.
 5. ~~Keyboard navigation, filters, open-in-browser, fullscreen frame~~
 6. ~~Reviewer group picker in settings~~
 7. ~~Non-TTY JSON output~~
-8. Auto-refresh on `ui.refreshSeconds`
-9. `az` CLI auth mode
+8. ~~`az` CLI auth mode~~
+9. Auto-refresh on `ui.refreshSeconds`
 10. Packaging: publish a binary somewhere installable
 
 ## License
