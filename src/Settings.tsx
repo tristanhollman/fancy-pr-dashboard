@@ -371,15 +371,24 @@ export default function Settings({
     }
 
     setStatus('validating');
-    const result = await validate(candidate);
-    setStatus('idle');
-    if (result) {
-      setFailure(result);
-      return;
-    }
+    try {
+      const result = await validate(candidate);
+      if (result) {
+        setFailure(result);
+        return;
+      }
 
-    await save(candidate);
-    onSave(candidate);
+      await save(candidate);
+      onSave(candidate);
+    } catch (error) {
+      // Neither `validate` nor `save` is expected to throw, but if either does — a disk
+      // write failing, say — it must land on screen. Silently swallowing it here left the
+      // draft change unsaved with no explanation, and reopening settings showed the old
+      // config again as if nothing had been typed.
+      setFailure({message: error instanceof Error ? error.message : String(error)});
+    } finally {
+      setStatus('idle');
+    }
   };
 
   useInput(
