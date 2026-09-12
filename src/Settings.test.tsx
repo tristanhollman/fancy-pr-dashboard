@@ -102,6 +102,28 @@ test('typing into a text field does not move the cursor', async () => {
   unmount();
 });
 
+test('s saves too — some terminals (classic Windows consoles) eat ctrl+s as a pause signal', async () => {
+  let saved: Config | undefined;
+  const {stdin, unmount} = render(
+    <Settings
+      config={usableConfig()}
+      onSave={next => {
+        saved = next;
+      }}
+      validate={async () => null}
+      save={async next => {
+        saved = next;
+      }}
+    />,
+  );
+
+  stdin.write('s');
+  await settle();
+  expect(saved?.org).toBe('myorg');
+
+  unmount();
+});
+
 test('a validation failure blocks the save and renders next to the field', async () => {
   const failure: ValidationFailure = {field: 'auth.pat', message: 'authentication rejected — check the PAT'};
   let saveCalls = 0;

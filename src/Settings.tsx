@@ -409,7 +409,13 @@ export default function Settings({
         onCancel?.();
         return;
       }
-      if (key.ctrl && input === 's') {
+      // ctrl+s alone is not reliable everywhere: classic Windows console hosts (conhost,
+      // not modern Windows Terminal) treat it as a pause-output signal before the app
+      // ever sees it, eating the keystroke entirely. Plain `s` works the same as ctrl+s
+      // (input is 's' either way) and is never intercepted like that; this handler is
+      // only active while not editing a field (see `isActive` below), so it can't
+      // collide with typing a value.
+      if (input === 's') {
         void attemptSave();
         return;
       }
@@ -524,7 +530,7 @@ export default function Settings({
         {status === 'validating' ? <Text color={COLORS.amber}>validating against Azure DevOps…</Text> : null}
         {failure && !failure.field ? <Text color={COLORS.red}>{failure.message}</Text> : null}
         <Text color={COLORS.dim}>
-          j/k move · enter edit/toggle · tab next group · ctrl+s save{onCancel ? ' · esc cancel' : ''}
+          j/k move · enter edit/toggle · tab next group · s save{onCancel ? ' · esc cancel' : ''}
         </Text>
       </Box>
     </Box>
