@@ -105,6 +105,14 @@ async function detail(response: Response): Promise<string> {
   }
 }
 
+/**
+ * A PAT hits the network directly, unlike az-cli which fails fast locally when there is
+ * no login — so a wrong org, a firewall, or a VPN that is not up would otherwise hang
+ * the request (and, since settings blocks input while validating, the whole screen)
+ * forever with no feedback at all.
+ */
+const REQUEST_TIMEOUT_MS = 15_000;
+
 async function apiFetch<T>(url: string, config: Config): Promise<T> {
   // Resolved outside the try so an auth failure is not reported as a network failure.
   const authorization = await authHeader(config);
@@ -113,8 +121,12 @@ async function apiFetch<T>(url: string, config: Config): Promise<T> {
   try {
     response = await fetch(url, {
       headers: {Authorization: authorization, Accept: 'application/json'},
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (error) {
+    if (error instanceof Error && error.name === 'TimeoutError') {
+      throw new ApiError(0, `Azure DevOps did not respond within ${REQUEST_TIMEOUT_MS / 1000}s — check the organization name and your network/VPN`);
+    }
     // Network-level failure: message comes from fetch, never from our headers.
     throw new ApiError(0, `could not reach Azure DevOps (${error instanceof Error ? error.message : 'network error'})`);
   }
