@@ -15,10 +15,25 @@ back the way it was on exit.
 
 ## Install
 
+### With Bun
+
+If you already have [Bun](https://bun.sh), install straight from GitHub — no registry to
+configure and nothing to download from a release:
+
+```sh
+bun install -g github:tristanhollman/fancy-pr-dashboard
+```
+
+That puts `fpr` on your `PATH` and runs the TypeScript directly, so it pulls a few MB of
+source and dependencies instead of the 115 MB binary. Re-run the same command to update —
+add `--force` if Bun hands back its cached copy.
+
+### Without Bun
+
 Grab the binary for your platform from a release and put it somewhere on your `PATH`.
 No runtime to install — the Bun runtime is baked in (which is also why it is ~115 MB).
 
-Building it yourself:
+### Building it yourself
 
 ```sh
 bun install
