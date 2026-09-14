@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>fpr / V1 design studies</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="gallery">
+    <header class="intro">
+      <div>
+        <p class="eyebrow">FANCY PR DASHBOARD / V1 DESIGN STUDIES</p>
+        <h1>Less hunting. More reviewing.</h1>
+        <p class="lede">Three ways to give your review queue a proper home in the terminal.</p>
+      </div>
+      <div class="study-label"><span class="sample-dot"></span> Interactive studies<span>Fictional data. No network calls.</span></div>
+    </header>
+
+    <nav class="concepts" aria-label="Design direction">
+      <button class="concept active" data-concept="workbench" aria-pressed="true">
+        <span class="concept-number">01</span><span><strong>Workbench <small>Recommended</small></strong><span>Repository rail / dense queue / inspector</span></span>
+      </button>
+      <button class="concept" data-concept="radar" aria-pressed="false">
+        <span class="concept-number">02</span><span><strong>Repo Radar</strong><span>A btop-inspired, multi-panel overview</span></span>
+      </button>
+      <button class="concept" data-concept="focus" aria-pressed="false">
+        <span class="concept-number">03</span><span><strong>Focus Inbox</strong><span>A quieter queue, with room to read</span></span>
+      </button>
+    </nav>
+
+    <div class="preview-tools">
+      <div class="width-options" role="group" aria-label="Preview width">
+        <span>VIEWPORT</span>
+        <button data-width="wide" aria-pressed="true">Wide</button>
+        <button data-width="laptop" aria-pressed="false">Laptop</button>
+        <button data-width="compact" aria-pressed="false">80-col estimate</button>
+      </div>
+      <label class="scenario-label">SCENARIO
+        <select id="scenario">
+          <option value="populated">Open pull requests</option>
+          <option value="empty">Empty queue</option>
+          <option value="loading">First load</option>
+          <option value="error">Refresh failed / cached data</option>
+        </select>
+      </label>
+      <button class="reset" id="reset">Reset study</button>
+    </div>
+
+    <div class="preview-surround">
+      <div class="terminal" data-width="wide" id="terminal">
+        <div class="window-bar"><span>fpr <span class="window-path">/ design preview</span></span><span id="window-label">01 - Workbench</span><span class="demo-label">OFFLINE DEMO</span></div>
+        <div id="app"></div>
+      </div>
+    </div>
+    <p class="try-note"><strong>Try it:</strong> click a PR, use <kbd>j</kbd>/<kbd>k</kbd>, search with <kbd>/</kbd>, or toggle the detail pane with <kbd>p</kbd>. Filters, repo selection, sorting, and all three layouts work. <kbd>Enter</kbd> previews the browser action; it does not open a real PR.</p>
+
+    <section class="design-notes" aria-label="About this design">
+      <div><p class="eyebrow">WHY THIS DIRECTION</p><h2 id="note-title"></h2><p id="note-strength"></p></div>
+      <div><p class="eyebrow">THE TRADE-OFF</p><h2 id="note-tradeoff-title"></h2><p id="note-tradeoff"></p></div>
+      <div><p class="eyebrow">IN A REAL TERMINAL</p><h2 id="note-terminal-title"></h2><p id="note-terminal"></p></div>
+    </section>
+
+    <section class="semantics">
+      <div class="semantics-heading"><p class="eyebrow">ONE SHARED UX CONTRACT</p><h2>Review counts, without guesswork.</h2><p>The same meaning in every layout. Color helps; text always carries the answer.</p></div>
+      <div class="semantics-grid">
+        <article><code>1/2 required</code><h3>Required reviewer entries</h3><p>One of two required people or groups has approved. A required group counts once, using its own vote, not a sum of its members.</p></article>
+        <article><code>You: pending</code><h3>Your next action is separate</h3><p>Keep your vote distinct from the team's progress. Waiting for the author and changes requested are not approvals.</p></article>
+        <article><code>None / Unknown</code><h3>No invented certainty</h3><p>No required entries is not missing data. Neither means mergeable: branch policies and other checks are a separate concern.</p></article>
+        <article><code>2/3 individuals</code><h3>Participation belongs in detail</h3><p>Individual approvals exclude group containers. The current app's team/reviewer ratio must not simply be relabeled "required."</p></article>
+      </div>
+    </section>
+
+    <section class="implementation-note">
+      <h2>Recommendation: ship the Workbench foundation.</h2>
+      <p>It gives frequent users a fast scan path without sacrificing the PR description. Borrow Radar's clear panel borders and Focus Inbox's readable inspector. Treat these as alternative directions, not three modes V1 must implement.</p>
+      <p><strong>Scope boundary:</strong> these are browser-based layout studies, not changes to the live TUI. Repo grouping, selection, vote status, age, and changed-file counts use concepts the app already supports. Descriptions, branches in the inspector, and explicitly required reviewer entries need to be retained in the app's data model. Policy evaluation is not implemented or inferred here. Refresh is simulated; production auto-refresh remains a separate task.</p>
+      <p><strong>Implementation guardrails:</strong> use Ink borders, fixed-cell columns, and flat ANSI colors; no gradients, images, web fonts, or mouse-only actions are needed. The browser studies use type-size differences for emphasis; a real terminal uses one font size, with bold, color, and spacing instead. Keep <kbd>Enter</kbd> opening the selected PR, add <kbd>p</kbd> for details, retain the existing filter keys, and propose <kbd>Tab</kbd> for pane focus with <kbd>1</kbd>-<kbd>4</kbd> for queue scopes. This HTML keeps native browser Tab navigation. At about 120 columns, drop the repo rail and secondary metadata; at 80, show the queue or inspector, never both squeezed together. Below 80, retain the repo, title, required count, and action in stacked rows.</p>
+      <p><strong>Before implementation:</strong> confirm required-group semantics against actual Azure DevOps payloads; handle absent descriptions and unknown review requirements; preserve selection across refreshes; paginate or virtualize long lists; keep per-pane scroll position; sanitize description control sequences; and provide an ASCII/high-contrast fallback. Browser dimensions are estimates, not a terminal resize test. No configuration or CLI flags are added.</p>
+    </section>
+    <footer class="gallery-footer"><span>fpr / made for the space between writing code and shipping it.</span><span>Open this file directly. Nothing to install.</span></footer>
+  </main>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="mockups.js"></script>
+</body>
+</html>

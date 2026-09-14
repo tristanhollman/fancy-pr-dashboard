@@ -172,6 +172,19 @@ stdin, so keyboard behaviour is testable without a real terminal (and therefore 
 CI). Anything touching raw mode or terminal resize still needs a real terminal — run
 `bun run dev` for that.
 
+### V1 UI design studies
+
+Open [`design/index.html`](design/index.html) directly in a browser to compare three
+interactive, terminal-oriented directions: **Workbench** (recommended), **Repo Radar**
+(btop-inspired), and **Focus Inbox** (description-first). No server, install, or network
+access is needed; all PR data is fictional and the live TUI is unchanged.
+
+The gallery includes repository and scope filters, keyboard selection, required-reviewer
+counts, PR descriptions, width presets, and empty/loading/stale-data scenarios.
+Each direction explains its UX tradeoffs and how it would adapt to a real terminal.
+Required-reviewer completion is a proposed data surface, not a relabeling of the current
+team-review progress; the gallery documents that distinction and the implementation gaps.
+
 ### The `react-devtools-core` stub
 
 `stubs/react-devtools-core` is a deliberate three-line fake, not a mistake. Ink lists
