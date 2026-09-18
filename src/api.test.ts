@@ -1,7 +1,8 @@
 import {afterEach, beforeEach, expect, test} from 'bun:test';
-import {ApiError, getChangedFileCount, getMe, listActivePullRequests, resetIdentityCache, type TaggedPullRequest} from './api.ts';
+import {ApiError, getChangedFileCount, getMe, getPullRequestDetails, getReviewRequirements, listActivePullRequests, resetIdentityCache, type TaggedPullRequest} from './api.ts';
 import {resetAzTokenCache, setAzRunner} from './azcli.ts';
 import {defaultConfig, type Config} from './config.ts';
+import {REVIEW_POLICY_TYPES} from './reviews.ts';
 
 const realFetch = globalThis.fetch;
 const savedEnvPat = process.env.FPR_PAT;
@@ -349,4 +350,229 @@ test('an HTML body on a 200 is reported as a wrong-organization symptom', async 
   stubFetch(() => ({text: '<html>sign in</html>'}));
 
   await expect(getMe(config())).rejects.toThrow('non-JSON response');
+});
+
+const PROJECT_ID = 'a7573007-bbb3-4341-b726-0c4148a07853';
+
+function prForReviews(overrides: Partial<TaggedPullRequest> = {}): TaggedPullRequest {
+  return prForDiff({
+    repository: {id: 'repo-guid', name: 'ingest-worker', project: {id: PROJECT_ID, name: 'platform'}},
+    reviewers: [],
+    ...overrides,
+  });
+}
+
+test('review requirements use the project GUID artifact and documented preview endpoint', async () => {
+  stubFetch(() => ({
+    body: {
+      value: [{
+        status: 'rejected',
+        configuration: {
+          isEnabled: true,
+          isBlocking: true,
+          type: {id: REVIEW_POLICY_TYPES.minimum},
+          settings: {minimumApproverCount: 2, creatorVoteCounts: false},
+        },
+      }],
+    },
+  }));
+
+  const result = await getReviewRequirements(config(), prForReviews());
+  expect(result.status).toBe('pending');
+  expect(result.minimum).toEqual({approved: 0, required: 2});
+  const url = new URL(calls[0]!.url);
+  expect(url.pathname).toBe(`/myorg/${PROJECT_ID}/_apis/policy/evaluations`);
+  expect(url.searchParams.get('artifactId')).toBe(`vstfs:///CodeReview/CodeReviewId/${PROJECT_ID}/7`);
+  expect(url.searchParams.get('api-version')).toBe('7.1-preview.1');
+  expect(url.searchParams.get('includeNotApplicable')).toBe('true');
+});
+
+test('review evaluation pagination finds a requirement after a full page of unrelated checks', async () => {
+  stubFetch(url => {
+    const skip = Number(new URL(url).searchParams.get('$skip'));
+    if (skip === 0) {
+      return {
+        body: {
+          value: Array.from({length: 100}, (_, i) => ({
+            evaluationId: `build-${i}`,
+            status: 'rejected',
+            configuration: {isEnabled: true, isBlocking: true, type: {id: '0609b952-1397-4640-95ec-e00a01b2c241'}},
+          })),
+        },
+      };
+    }
+    return {
+      body: {
+        value: [{
+          evaluationId: 'review',
+          status: 'queued',
+          configuration: {
+            isEnabled: true, isBlocking: true,
+            type: {id: REVIEW_POLICY_TYPES.minimum}, settings: {minimumApproverCount: 1},
+          },
+        }],
+      },
+    };
+  });
+  const result = await getReviewRequirements(config(), prForReviews());
+  expect(result.status).toBe('pending');
+  expect(result.minimum?.required).toBe(1);
+  expect(calls.map(call => new URL(call.url).searchParams.get('$skip'))).toEqual(['0', '100']);
+});
+
+test('an exact full evaluation page is followed by an empty final page', async () => {
+  stubFetch(url => ({
+    body: {
+      value: new URL(url).searchParams.get('$skip') === '0'
+        ? Array.from({length: 100}, (_, i) => ({evaluationId: `optional-${i}`, configuration: {isBlocking: false}}))
+        : [],
+    },
+  }));
+  expect((await getReviewRequirements(config(), prForReviews())).status).toBe('none');
+  expect(calls).toHaveLength(2);
+});
+
+test('review requirements are unknown without a project GUID and never send the project name as artifact ID', async () => {
+  stubFetch(() => ({body: {value: []}}));
+  for (const project of [undefined, {name: 'platform'}, {id: 'platform'}, {id: ''}]) {
+    const result = await getReviewRequirements(config(), prForReviews({
+      repository: {name: 'repo', project},
+      reviewers: [{id: 'required', vote: 10, isRequired: true}],
+    }));
+    expect(result.status).toBe('unknown');
+  }
+  expect(calls).toHaveLength(0);
+});
+
+test('confirmed empty review evaluations can establish none, but absent list data cannot', async () => {
+  stubFetch(() => ({body: {value: []}}));
+  expect((await getReviewRequirements(config(), prForReviews())).status).toBe('none');
+  for (const body of [{}, {value: null}, {value: {}}]) {
+    stubFetch(() => ({body}));
+    await expect(getReviewRequirements(config(), prForReviews())).rejects.toThrow('invalid list response');
+  }
+});
+
+test('review-policy HTTP failures propagate instead of declaring completion from required votes', async () => {
+  const pr = prForReviews({reviewers: [{id: 'required', vote: 10, isRequired: true}]});
+  for (const status of [401, 403, 404, 429, 500]) {
+    stubFetch(() => ({status, body: {}}));
+    await expect(getReviewRequirements(config(), pr)).rejects.toBeInstanceOf(ApiError);
+  }
+});
+
+test('review-policy network failures propagate', async () => {
+  globalThis.fetch = (async () => { throw new Error('offline'); }) as unknown as typeof fetch;
+  await expect(getReviewRequirements(config(), prForReviews())).rejects.toThrow('could not reach Azure DevOps');
+});
+
+test('a later review-policy page failure does not return the first page as complete', async () => {
+  stubFetch(url => new URL(url).searchParams.get('$skip') === '0'
+    ? {body: {value: Array.from({length: 100}, (_, i) => ({evaluationId: `optional-${i}`, configuration: {isBlocking: false}}))}}
+    : {status: 503});
+  await expect(getReviewRequirements(config(), prForReviews())).rejects.toThrow(ApiError);
+});
+
+test('repeated evaluation pages fail safely instead of looping forever or claiming completeness', async () => {
+  stubFetch(() => ({
+    body: {value: Array.from({length: 100}, (_, i) => ({evaluationId: `optional-${i}`, configuration: {isBlocking: false}}))},
+  }));
+  await expect(getReviewRequirements(config(), prForReviews())).rejects.toThrow('repeated a page');
+  expect(calls).toHaveLength(2);
+});
+
+test('active PR listing pages each project before applying repository filters', async () => {
+  stubFetch(url => {
+    const skip = Number(new URL(url).searchParams.get('$skip'));
+    const offset = url.includes('/platform/') ? 0 : 10;
+    return {
+      body: {
+        value: skip === 0
+          ? [prForReviews({pullRequestId: offset + 1}), prForReviews({pullRequestId: offset + 2})]
+          : [prForReviews({pullRequestId: offset + 3, repository: {name: 'wanted'}})],
+      },
+    };
+  });
+  const c = config();
+  c.projects = ['platform', 'payments'];
+  c.repos = ['wanted'];
+  expect((await listActivePullRequests(c, 2)).map(pr => [pr.project, pr.pullRequestId])).toEqual([
+    ['platform', 3], ['payments', 13],
+  ]);
+  expect(calls).toHaveLength(4);
+  expect(calls.filter(call => new URL(call.url).searchParams.get('$skip') === '2')).toHaveLength(2);
+});
+
+test('default active PR listing reads more than 200 rows', async () => {
+  stubFetch(url => ({
+    body: {
+      value: new URL(url).searchParams.get('$skip') === '0'
+        ? Array.from({length: 200}, (_, i) => prForReviews({pullRequestId: i + 1}))
+        : [prForReviews({pullRequestId: 201})],
+    },
+  }));
+  expect(await listActivePullRequests(config())).toHaveLength(201);
+  expect(calls).toHaveLength(2);
+});
+
+test('top=1 validation stays a single request, with an explicit opt-in to pagination', async () => {
+  stubFetch(url => ({body: {value: new URL(url).searchParams.get('$skip') === '0' ? [prForReviews()] : []}}));
+  expect(await listActivePullRequests(config(), 1)).toHaveLength(1);
+  expect(calls).toHaveLength(1);
+  calls = [];
+  expect(await listActivePullRequests(config(), 1, true)).toHaveLength(1);
+  expect(calls).toHaveLength(2);
+});
+
+test('PR list retains description, branch names, stable repository/project identity and required metadata', async () => {
+  const expected = prForReviews({
+    description: '# Context\nReview carefully.',
+    reviewers: [{id: 'group', vote: 5, isContainer: true, isRequired: true}],
+  });
+  stubFetch(() => ({body: {value: [expected]}}));
+  expect((await listActivePullRequests(config()))[0]).toEqual(expected);
+});
+
+test('individual PR details return descriptions beyond the list limit and preserve the project tag', async () => {
+  const description = '# Full description\n' + 'Longer review context.\n'.repeat(100);
+  const expected = prForReviews({
+    description,
+    reviewers: [{id: 'required-team', vote: 5, isRequired: true, isContainer: true}],
+  });
+  stubFetch(() => ({body: {...expected, project: 'not-the-local-tag'}}));
+
+  const base = prForReviews({description: description.slice(0, 400)});
+  const details = await getPullRequestDetails(config(), base);
+  expect(details).toEqual(expected);
+  expect(details.description!.length).toBeGreaterThan(400);
+  expect(base.description).toHaveLength(400);
+  expect(calls).toHaveLength(1);
+  expect(new URL(calls[0]!.url).pathname).toBe(`/myorg/${PROJECT_ID}/_apis/git/repositories/repo-guid/pullrequests/7`);
+  expect(new URL(calls[0]!.url).searchParams.get('api-version')).toBe('7.1');
+});
+
+test('individual PR details encode names when stable repository/project IDs are unavailable', async () => {
+  const base = prForDiff({project: 'A project', repository: {name: 'repo/name'}});
+  stubFetch(() => ({body: base}));
+  const c = config();
+  c.org = 'an org';
+  expect(await getPullRequestDetails(c, base)).toEqual(base);
+  expect(calls[0]!.url).toContain('/an%20org/A%20project/_apis/git/repositories/repo%2Fname/pullrequests/7');
+});
+
+test('individual PR details do not resurrect a removed description from the list snapshot', async () => {
+  const base = prForReviews({description: 'Older list description'});
+  for (const description of ['', undefined]) {
+    stubFetch(() => ({body: prForReviews({description})}));
+    expect((await getPullRequestDetails(config(), base)).description ?? '').toBe('');
+  }
+});
+
+test('individual PR detail failures and malformed or mismatched responses propagate', async () => {
+  stubFetch(() => ({status: 503}));
+  await expect(getPullRequestDetails(config(), prForReviews())).rejects.toThrow(ApiError);
+  for (const body of [{}, {value: []}, prForReviews({pullRequestId: 8}), {...prForReviews(), description: 42}]) {
+    stubFetch(() => ({body}));
+    await expect(getPullRequestDetails(config(), prForReviews())).rejects.toThrow('invalid pull request details');
+  }
 });

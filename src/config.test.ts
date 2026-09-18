@@ -1,15 +1,15 @@
 import {afterEach, beforeEach, expect, test} from 'bun:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import {clampRefresh, defaultConfig, effectivePat, isValid, loadConfig, normalize, saveConfig} from './config.ts';
+import {clampRefresh, defaultConfig, defaultWorkspacePreferences, effectivePat, isValid, loadConfig, normalize, saveConfig} from './config.ts';
 
 let dir: string;
 let file: string;
 const savedEnvPat = process.env.FPR_PAT;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fpr-config-'));
+  dir = path.join(process.cwd(), `.fpr-config-test-${crypto.randomUUID()}`);
+  fs.mkdirSync(dir);
   file = path.join(dir, 'nested', 'config.json');
   delete process.env.FPR_PAT;
 });
@@ -135,4 +135,86 @@ test('refresh interval floors at 15 seconds', () => {
   expect(clampRefresh(3)).toBe(15);
   expect(clampRefresh(Number.NaN)).toBe(45);
   expect(clampRefresh('30')).toBe(45);
+});
+
+test('new workspace preferences are queue-focused without changing legacy JSON defaults', () => {
+  const defaults = {
+    showRepositories: true, showDetails: true, groupByRepo: true, sort: 'newest',
+    hideReviewed: true, hideComplete: true, hideMyDrafts: false, hideMyBots: true,
+    repoWidth: 22, listShare: 0.42, mouseEnabled: true,
+  } as const;
+  expect(defaultWorkspacePreferences()).toEqual(defaults);
+  expect(defaultConfig().ui.workspace).toEqual(defaults);
+  expect(defaultConfig().ui.hideReviewed).toBe(false);
+  expect(normalize({}).ui.workspace).toEqual(defaults);
+  expect(normalize({ui: {}}).ui.workspace.hideReviewed).toBe(true);
+
+  const changed = defaultWorkspacePreferences();
+  changed.showDetails = false;
+  expect(defaultWorkspacePreferences().showDetails).toBe(true);
+});
+
+test('legacy reviewed preference migrates only when workspace preference is missing', async () => {
+  for (const legacy of [false, true]) {
+    await Bun.write(file, JSON.stringify({ui: {hideReviewed: legacy}}));
+    const {config} = await loadConfig(file);
+    expect(config.ui.workspace.hideReviewed).toBe(legacy);
+    expect(config.ui.hideReviewed).toBe(legacy);
+    expect(normalize({ui: {hideReviewed: legacy, workspace: {showDetails: false}}}).ui.workspace.hideReviewed).toBe(legacy);
+    expect(normalize({ui: {hideReviewed: legacy, workspace: {hideReviewed: !legacy}}}).ui.workspace.hideReviewed).toBe(!legacy);
+    await saveConfig(config, file);
+    expect((await loadConfig(file)).config.ui.workspace.hideReviewed).toBe(legacy);
+  }
+});
+
+test('workspace normalization rejects invalid types and bounds finite geometry', () => {
+  for (const workspace of [null, [], 'invalid', {
+    showRepositories: 0, showDetails: 'false', groupByRepo: null, sort: 'random',
+    hideReviewed: 'false', hideComplete: 1, repoWidth: NaN, listShare: Infinity, mouseEnabled: [],
+  }]) {
+    expect(normalize({ui: {workspace}}).ui.workspace).toEqual(defaultWorkspacePreferences());
+  }
+  expect(normalize({ui: {hideReviewed: false, workspace: {hideReviewed: 'invalid'}}}).ui.workspace.hideReviewed).toBe(true);
+  for (const [repoWidth, listShare, expectedWidth, expectedShare] of [
+    [-5, -1, 16, 0.1], [100, 5, 36, 0.9], [23.6, 0.55, 24, 0.55],
+  ] as const) {
+    const normalized = normalize({ui: {workspace: {repoWidth, listShare}}}).ui.workspace;
+    expect(normalized.repoWidth).toBe(expectedWidth);
+    expect(normalized.listShare).toBe(expectedShare);
+  }
+  expect(normalize({ui: {workspace: {repoWidth: '20', listShare: '0.5'}}}).ui.workspace).toEqual(defaultWorkspacePreferences());
+});
+
+test('workspace preferences persist independently from legacy filters and clamp on save', async () => {
+  const config = defaultConfig();
+  config.ui.hideReviewed = false;
+  config.ui.workspace = {
+    ...defaultWorkspacePreferences(),
+    showRepositories: false, showDetails: false, groupByRepo: false, sort: 'oldest',
+    hideReviewed: true, hideComplete: false, repoWidth: 99, listShare: -1, mouseEnabled: false,
+  };
+  await saveConfig(config, file);
+  const loaded = (await loadConfig(file)).config;
+  expect(loaded.ui.workspace).toEqual({...config.ui.workspace, repoWidth: 36, listShare: 0.1});
+  expect(loaded.ui.hideReviewed).toBe(false);
+  expect(JSON.parse(await Bun.file(file).text()).ui.workspace).toEqual(loaded.ui.workspace);
+});
+
+test('My PRs defaults show drafts even with older shared hide-drafts settings', async () => {
+  const old = normalize({ui: {hideDrafts: true, hideBots: false, workspace: {groupByRepo: false}}});
+  expect(old.ui.workspace.hideMyDrafts).toBe(false);
+  expect(old.ui.workspace.hideMyBots).toBe(true);
+  expect(old.ui.hideDrafts).toBe(true);
+  expect(old.ui.hideBots).toBe(false);
+  old.ui.workspace.hideMyDrafts = true;
+  old.ui.workspace.hideMyBots = false;
+  await saveConfig(old, file);
+  const {config: restored} = await loadConfig(file);
+  expect(restored.ui.workspace.hideMyDrafts).toBe(true);
+  expect(restored.ui.workspace.hideMyBots).toBe(false);
+  expect(restored.ui.hideDrafts).toBe(true);
+  expect(restored.ui.hideBots).toBe(false);
+  const repaired = normalize({ui: {workspace: {hideMyDrafts: 'true', hideMyBots: 0}}});
+  expect(repaired.ui.workspace.hideMyDrafts).toBe(false);
+  expect(repaired.ui.workspace.hideMyBots).toBe(true);
 });

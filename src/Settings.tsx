@@ -1,10 +1,10 @@
 import React, {useMemo, useRef, useState} from 'react';
-import {Box, Text, useInput} from 'ink';
+import {Box, Text, useInput, useWindowSize} from 'ink';
 import TextInput from 'ink-text-input';
 import {getMe, listActivePullRequests, resetIdentityCache, ApiError} from './api.ts';
 import {getAzAccessToken, resetAzTokenCache} from './azcli.ts';
 import {discoverReviewerGroups, type ReviewerGroup} from './classify.ts';
-import {clampRefresh, isValid, patFromEnv, saveConfig, type Config} from './config.ts';
+import {defaultWorkspacePreferences, isValid, normalize, patFromEnv, saveConfig, type Config} from './config.ts';
 import {COLORS} from './Dashboard.tsx';
 
 /** A validation failure, optionally pinned to the field that caused it. */
@@ -55,7 +55,7 @@ export type GroupFinder = (config: Config) => Promise<ReviewerGroup[]>;
 /** The groups already acting as container reviewers on the configured projects' PRs. */
 export const findGroupsLive: GroupFinder = async config => discoverReviewerGroups(await listActivePullRequests(config));
 
-type Kind = 'text' | 'secret' | 'toggle' | 'picker';
+type Kind = 'text' | 'secret' | 'toggle' | 'picker' | 'action';
 
 interface Field {
   key: string;
@@ -197,9 +197,118 @@ function fieldsFor(draft: Config): Field[] {
 
   fields.push(
     {
+      key: 'ui.workspace.showRepositories',
+      group: 'Workspace',
+      label: 'show repositories',
+      kind: 'toggle',
+      value: draft.ui.workspace.showRepositories ? 'on' : 'off',
+      toggle: d => {
+        d.ui.workspace.showRepositories = !d.ui.workspace.showRepositories;
+      },
+    },
+    {
+      key: 'ui.workspace.showDetails',
+      group: 'Workspace',
+      label: 'show details',
+      kind: 'toggle',
+      value: draft.ui.workspace.showDetails ? 'on' : 'off',
+      toggle: d => {
+        d.ui.workspace.showDetails = !d.ui.workspace.showDetails;
+      },
+    },
+    {
+      key: 'ui.workspace.groupByRepo',
+      group: 'Workspace',
+      label: 'group by repository',
+      kind: 'toggle',
+      value: draft.ui.workspace.groupByRepo ? 'on' : 'off',
+      toggle: d => {
+        d.ui.workspace.groupByRepo = !d.ui.workspace.groupByRepo;
+      },
+    },
+    {
+      key: 'ui.workspace.sort',
+      group: 'Workspace',
+      label: 'sort by date',
+      kind: 'toggle',
+      value: draft.ui.workspace.sort,
+      hint: 'newest | oldest',
+      toggle: d => {
+        d.ui.workspace.sort = d.ui.workspace.sort === 'newest' ? 'oldest' : 'newest';
+      },
+    },
+    {
+      key: 'ui.workspace.hideReviewed',
+      group: 'Workspace',
+      label: 'hide my reviewed (queue)',
+      kind: 'toggle',
+      value: draft.ui.workspace.hideReviewed ? 'on' : 'off',
+      hint: 'review queue only; all other scopes keep reviewed PRs',
+      toggle: d => {
+        d.ui.workspace.hideReviewed = !d.ui.workspace.hideReviewed;
+      },
+    },
+    {
+      key: 'ui.workspace.hideComplete',
+      group: 'Workspace',
+      label: 'hide required-complete',
+      kind: 'toggle',
+      value: draft.ui.workspace.hideComplete ? 'on' : 'off',
+      hint: 'review queue only; unknown requirements stay visible',
+      toggle: d => {
+        d.ui.workspace.hideComplete = !d.ui.workspace.hideComplete;
+      },
+    },
+    {
+      key: 'ui.workspace.mouseEnabled',
+      group: 'Workspace',
+      label: 'mouse input',
+      kind: 'toggle',
+      value: draft.ui.workspace.mouseEnabled ? 'on' : 'off',
+      hint: 'click, scroll and drag workspace dividers',
+      toggle: d => {
+        d.ui.workspace.mouseEnabled = !d.ui.workspace.mouseEnabled;
+      },
+    },
+    {
+      key: 'ui.workspace.resetGeometry',
+      group: 'Workspace',
+      label: 'reset pane geometry',
+      kind: 'action',
+      value: `${draft.ui.workspace.repoWidth} cols · ${Math.round(draft.ui.workspace.listShare * 100)}% list`,
+      hint: 'enter resets widths only, not panes or filters',
+      toggle: d => {
+        const defaults = defaultWorkspacePreferences();
+        d.ui.workspace.repoWidth = defaults.repoWidth;
+        d.ui.workspace.listShare = defaults.listShare;
+      },
+    },
+    {
+      key: 'ui.workspace.hideMyDrafts',
+      group: 'My PRs',
+      label: 'hide my drafts',
+      kind: 'toggle',
+      value: draft.ui.workspace.hideMyDrafts ? 'on' : 'off',
+      hint: 'My PRs only; d in that tab does not affect other scopes',
+      toggle: d => {
+        d.ui.workspace.hideMyDrafts = !d.ui.workspace.hideMyDrafts;
+      },
+    },
+    {
+      key: 'ui.workspace.hideMyBots',
+      group: 'My PRs',
+      label: 'hide my bot-authored PRs',
+      kind: 'toggle',
+      value: draft.ui.workspace.hideMyBots ? 'on' : 'off',
+      hint: 'My PRs only; b in that tab does not affect other scopes',
+      toggle: d => {
+        d.ui.workspace.hideMyBots = !d.ui.workspace.hideMyBots;
+      },
+    },
+    {
       key: 'ui.hideReviewed',
       group: 'Display',
-      label: 'hide reviewed',
+      label: 'JSON-only hide reviewed',
       kind: 'toggle',
       value: draft.ui.hideReviewed ? 'on' : 'off',
       toggle: d => {
@@ -212,6 +321,7 @@ function fieldsFor(draft: Config): Field[] {
       label: 'dedupe assigned from team',
       kind: 'toggle',
       value: draft.ui.dedupeAssignedFromTeamSection ? 'on' : 'off',
+      hint: 'exclude assignments matching only you from Team queue; also applies to JSON',
       toggle: d => {
         d.ui.dedupeAssignedFromTeamSection = !d.ui.dedupeAssignedFromTeamSection;
       },
@@ -222,7 +332,7 @@ function fieldsFor(draft: Config): Field[] {
       label: 'hide drafts',
       kind: 'toggle',
       value: draft.ui.hideDrafts ? 'on' : 'off',
-      hint: 'toggle live with d',
+      hint: 'd outside My PRs; that tab has its own preference',
       toggle: d => {
         d.ui.hideDrafts = !d.ui.hideDrafts;
       },
@@ -233,7 +343,7 @@ function fieldsFor(draft: Config): Field[] {
       label: 'hide bot authors',
       kind: 'toggle',
       value: draft.ui.hideBots ? 'on' : 'off',
-      hint: 'toggle live with b',
+      hint: 'b outside My PRs; that tab has its own preference',
       toggle: d => {
         d.ui.hideBots = !d.ui.hideBots;
       },
@@ -279,6 +389,8 @@ export interface SettingsProps {
   /** Injected in tests so the screen never touches the real config file. */
   save?: (config: Config) => Promise<void>;
   findGroups?: GroupFinder;
+  columns?: number;
+  height?: number;
 }
 
 interface PickerState {
@@ -295,14 +407,20 @@ export default function Settings({
   validate = validateLive,
   save = c => saveConfig(c),
   findGroups = findGroupsLive,
+  columns,
+  height,
 }: SettingsProps) {
-  const [draft, setDraft] = useState<Config>(() => clone(config));
+  const size = useWindowSize();
+  const width = Math.max(1, Math.floor(columns ?? size.columns ?? 100));
+  const rows = Math.max(1, Math.floor(height ?? size.rows ?? 24));
+  const [draft, setDraft] = useState<Config>(() => normalize(config));
   const [cursor, setCursor] = useState(0);
   const [editing, setEditing] = useState(false);
   const [buffer, setBuffer] = useState('');
   const [failure, setFailure] = useState<ValidationFailure | null>(null);
   const [status, setStatus] = useState<'idle' | 'validating'>('idle');
   const [picker, setPicker] = useState<PickerState | null>(null);
+  const viewportStart = useRef(0);
 
   const fields = useMemo(() => fieldsFor(draft), [draft]);
   const index = Math.min(cursor, fields.length - 1);
@@ -330,7 +448,7 @@ export default function Settings({
 
   const startEdit = () => {
     const target = fields[cursorRef.current];
-    if (!target || target.readOnly || target.kind === 'toggle') return;
+    if (!target || target.readOnly || (target.kind !== 'text' && target.kind !== 'secret')) return;
     setBuffer(target.value);
     setEditing(true);
   };
@@ -362,8 +480,7 @@ export default function Settings({
   };
 
   const attemptSave = async () => {
-    const candidate = clone(draft);
-    candidate.ui.refreshSeconds = clampRefresh(candidate.ui.refreshSeconds);
+    const candidate = normalize(draft);
 
     if (!isValid(candidate)) {
       setFailure({message: 'organization, at least one project and auth are all required'});
@@ -375,6 +492,8 @@ export default function Settings({
       const result = await validate(candidate);
       if (result) {
         setFailure(result);
+        const failedIndex = fields.findIndex(f => f.key === result.field);
+        if (failedIndex >= 0) moveTo(failedIndex);
         return;
       }
 
@@ -399,8 +518,12 @@ export default function Settings({
       if (picker) {
         if (key.escape) setPicker(null);
         else if (picker.loading) return;
-        else if (input === 'j' || key.downArrow) setPicker({...picker, index: Math.min(picker.index + 1, picker.groups.length - 1)});
-        else if (input === 'k' || key.upArrow) setPicker({...picker, index: Math.max(picker.index - 1, 0)});
+        else if (input === 'j' || key.downArrow) setPicker(previous => previous && ({
+          ...previous, index: Math.min(previous.index + 1, Math.max(0, previous.groups.length - 1)),
+        }));
+        else if (input === 'k' || key.upArrow) setPicker(previous => previous && ({
+          ...previous, index: Math.max(previous.index - 1, 0),
+        }));
         else if (key.return) choose(picker.groups[picker.index]);
         return;
       }
@@ -437,7 +560,7 @@ export default function Settings({
       }
       if (key.return) {
         const target = fields[cursorRef.current];
-        if (target?.kind === 'toggle' && target.toggle) commit(d => target.toggle?.(d));
+        if ((target?.kind === 'toggle' || target?.kind === 'action') && target.toggle) commit(d => target.toggle?.(d));
         else if (target?.kind === 'picker') void openPicker();
         else startEdit();
       }
@@ -445,94 +568,136 @@ export default function Settings({
     {isActive: !editing},
   );
 
-  let lastGroup = '';
+  const headerRows = rows >= 2 ? 1 : 0;
+  const footerRows = rows >= 5 ? 2 : rows >= 3 ? 1 : 0;
+  const bodyRows = rows - headerRows - footerRows;
+  const padding = width >= 20 ? 1 : 0;
+  const contentWidth = width - padding * 2;
 
   if (picker) {
+    const start = Math.max(0, picker.index - bodyRows + 1);
     return (
-      <Box flexDirection="column" paddingX={1}>
-        <Box>
-          <Text color={COLORS.blue} bold>
-            reviewer group
-          </Text>
-          <Text color={COLORS.dim}> · groups already reviewing pull requests in your projects</Text>
-        </Box>
+      <Box flexDirection="column" width={width} height={rows} paddingX={padding} overflow="hidden">
+        {headerRows > 0 ? (
+          <Box height={1} flexShrink={0}>
+            <Text color={COLORS.blue} bold wrap="truncate-end">
+              reviewer group · groups already reviewing pull requests in your projects
+            </Text>
+          </Box>
+        ) : null}
 
-        <Box marginTop={1} flexDirection="column">
-          {picker.loading ? <Text color={COLORS.amber}>looking through open pull requests…</Text> : null}
-          {picker.error ? <Text color={COLORS.red}>{picker.error}</Text> : null}
+        <Box height={bodyRows} flexShrink={0} flexDirection="column" overflow="hidden">
+          {picker.loading ? <Text color={COLORS.amber} wrap="truncate-end">looking through open pull requests…</Text> : null}
+          {picker.error ? <Text color={COLORS.red} wrap="truncate-end">{picker.error}</Text> : null}
           {!picker.loading && !picker.error && picker.groups.length === 0 ? (
-            <Text color={COLORS.dim} italic>
+            <Text color={COLORS.dim} italic wrap="truncate-end">
               no group is a reviewer on any open PR — check the projects, or use manual mode with a member list
             </Text>
           ) : null}
-          {picker.groups.map((group, i) => (
-            <Box key={group.descriptor}>
-              <Text color={COLORS.blue}>{i === picker.index ? '› ' : '  '}</Text>
-              <Box width={40}>
-                <Text color={i === picker.index ? COLORS.bright : COLORS.text}>{group.displayName}</Text>
-              </Box>
-              <Text color={COLORS.dim}>{`reviewer on ${group.prCount} open PR${group.prCount === 1 ? '' : 's'}`}</Text>
+          {picker.groups.slice(start, start + bodyRows).map((group, i) => (
+            <Box key={group.descriptor} height={1} flexShrink={0}>
+              <Text wrap="truncate-end">
+                <Text color={COLORS.blue}>{start + i === picker.index ? '› ' : '  '}</Text>
+                <Text color={start + i === picker.index ? COLORS.bright : COLORS.text}>{group.displayName}</Text>
+                <Text color={COLORS.dim}>{` · reviewer on ${group.prCount} open PR${group.prCount === 1 ? '' : 's'}`}</Text>
+              </Text>
             </Box>
           ))}
         </Box>
 
-        <Box marginTop={1}>
-          <Text color={COLORS.dim}>j/k move · enter pick · esc back</Text>
-        </Box>
+        {footerRows > 1 ? (
+          <Text color={COLORS.dim} wrap="truncate-end">
+            {picker.groups.length > 0 ? `${picker.index + 1}/${picker.groups.length} groups` : 'reviewer groups'}
+          </Text>
+        ) : null}
+        {footerRows > 0 ? <Text color={COLORS.dim} wrap="truncate-end">j/k move · enter pick · esc back</Text> : null}
       </Box>
     );
   }
 
+  type Line =
+    | {kind: 'header'; key: string; group: string}
+    | {kind: 'field'; key: string; field: Field; index: number}
+    | {kind: 'error'; key: string; message: string};
+  const lines: Line[] = [];
+  let lastGroup = '';
+  for (const [i, f] of fields.entries()) {
+    if (f.group !== lastGroup) {
+      lines.push({kind: 'header', key: f.group, group: f.group});
+      lastGroup = f.group;
+    }
+    lines.push({kind: 'field', key: f.key, field: f, index: i});
+    if (failure?.field === f.key) lines.push({kind: 'error', key: `${f.key}.error`, message: failure.message});
+  }
+  const selectedLine = lines.findIndex(line => line.kind === 'field' && line.index === index);
+  const selectedEnd = bodyRows > 1 && lines[selectedLine + 1]?.kind === 'error' ? selectedLine + 1 : selectedLine;
+  let start = Math.min(viewportStart.current, Math.max(0, lines.length - bodyRows));
+  if (selectedLine < start) {
+    start = Math.max(0, selectedLine - (bodyRows > 1 && lines[selectedLine - 1]?.kind === 'header' ? 1 : 0));
+  }
+  if (selectedEnd >= start + bodyRows) start = selectedEnd - bodyRows + 1;
+  viewportStart.current = start;
+
+  const labelWidth = Math.min(26, Math.max(1, contentWidth - 12));
+  const footerMessage = status === 'validating' ? 'validating against Azure DevOps…'
+    : failure?.message ?? `${index + 1}/${fields.length} · ${field?.group}${field?.hint ? ` · ${field.hint}` : ''}`;
+  const footerColor = failure ? COLORS.red : status === 'validating' ? COLORS.amber : COLORS.dim;
+
   return (
-    <Box flexDirection="column" paddingX={1}>
-      <Box>
-        <Text color={COLORS.blue} bold>
-          settings
-        </Text>
-        <Text color={COLORS.dim}> · the only way to configure fpr</Text>
-      </Box>
+    <Box flexDirection="column" width={width} height={rows} paddingX={padding} overflow="hidden">
+      {headerRows > 0 ? (
+        <Box height={1} flexShrink={0}>
+          <Text wrap="truncate-end">
+            <Text color={COLORS.blue} bold>settings</Text>
+            <Text color={COLORS.dim}> · the only way to configure fpr</Text>
+          </Text>
+        </Box>
+      ) : null}
 
-      {fields.map((f, i) => {
-        const header = f.group === lastGroup ? null : f.group;
-        lastGroup = f.group;
-        const selected = i === index;
-        const fieldError = failure?.field === f.key ? failure.message : undefined;
-
-        return (
-          <Box key={f.key} flexDirection="column">
-            {header ? (
-              <Box marginTop={1}>
-                <Text color={COLORS.bright} bold>
-                  {header.toUpperCase()}
+      <Box height={bodyRows} flexShrink={0} flexDirection="column" overflow="hidden">
+        {lines.slice(start, start + bodyRows).map(line => {
+          if (line.kind === 'header') {
+            return <Text key={line.key} color={COLORS.bright} bold wrap="truncate-end">{line.group.toUpperCase()}</Text>;
+          }
+          if (line.kind === 'error') {
+            return <Text key={line.key} color={COLORS.red} wrap="truncate-end"> {line.message}</Text>;
+          }
+          const f = line.field;
+          const selected = line.index === index;
+          return (
+            <Box key={line.key} height={1} flexShrink={0} overflow="hidden">
+              <Box width={Math.min(2, contentWidth)} flexShrink={0}>
+                <Text color={COLORS.blue} wrap="truncate-end">{selected ? '› ' : '  '}</Text>
+              </Box>
+              <Box width={labelWidth} flexShrink={0}>
+                <Text color={selected ? COLORS.bright : COLORS.text} wrap="truncate-end">{f.label}</Text>
+              </Box>
+              <Box flexGrow={1} minWidth={0}>
+                <Text wrap="truncate-end">
+                  {selected && editing ? (
+                    <TextInput value={buffer} onChange={setBuffer} onSubmit={finishEdit} focus mask={f.kind === 'secret' ? '*' : undefined} />
+                  ) : (
+                    <Text color={f.readOnly ? COLORS.dim : COLORS.amber}>{displayValue(f)}</Text>
+                  )}
+                  {f.hint && selected && !editing ? <Text color={COLORS.dim}> {f.hint}</Text> : null}
                 </Text>
               </Box>
-            ) : null}
-            <Box>
-              <Text color={COLORS.blue}>{selected ? '› ' : '  '}</Text>
-              <Box width={26}>
-                <Text color={selected ? COLORS.bright : COLORS.text}>{f.label}</Text>
-              </Box>
-              <Box>
-                {selected && editing ? (
-                  <TextInput value={buffer} onChange={setBuffer} onSubmit={finishEdit} focus mask={f.kind === 'secret' ? '*' : undefined} />
-                ) : (
-                  <Text color={f.readOnly ? COLORS.dim : COLORS.amber}>{displayValue(f)}</Text>
-                )}
-              </Box>
-              {f.hint && selected && !editing ? <Text color={COLORS.dim}> {f.hint}</Text> : null}
             </Box>
-            {fieldError ? <Text color={COLORS.red}> {fieldError}</Text> : null}
-          </Box>
-        );
-      })}
-
-      <Box marginTop={1} flexDirection="column">
-        {status === 'validating' ? <Text color={COLORS.amber}>validating against Azure DevOps…</Text> : null}
-        {failure && !failure.field ? <Text color={COLORS.red}>{failure.message}</Text> : null}
-        <Text color={COLORS.dim}>
-          j/k move · enter edit/toggle · tab next group · s save{onCancel ? ' · esc cancel' : ''}
-        </Text>
+          );
+        })}
       </Box>
+
+      {footerRows > 0 ? (
+        <Box height={footerRows} flexShrink={0} flexDirection="column" overflow="hidden">
+          {footerRows > 1 ? <Text color={footerColor} wrap="truncate-end">{footerMessage}</Text> : null}
+          <Box height={1} flexShrink={0}>
+            <Text color={COLORS.dim} wrap="truncate-end">
+              {width < 70 ? `j/k move · enter edit · tab group · s save${onCancel ? ' · esc back' : ''}`
+                : `j/k move · enter edit/toggle · tab next group · s save${onCancel ? ' · esc cancel' : ''}`}
+            </Text>
+          </Box>
+        </Box>
+      ) : null}
     </Box>
   );
 }

@@ -304,3 +304,34 @@ test('section starts skip empty sections', () => {
   expect(sectionStarts(sections)).toEqual([0]);
   expect(nextSectionStart(sectionStarts(sections), 0)).toBe(0);
 });
+
+test('rows preserve descriptions, branch labels, stable identity and explicit reviewer requirements', () => {
+  const row = classify(pr({
+    description: '# Motivation\nKeep this text intact.',
+    sourceRefName: 'refs/heads/feature/improve-search',
+    targetRefName: 'refs/heads/main',
+    repository: {id: 'repo-guid', name: 'repo', project: {id: 'project-guid', name: 'platform'}},
+    reviewers: [
+      {...reviewer(teamGroup, VOTE.approved, true), isRequired: true},
+      reviewer(bob, VOTE.approvedWithSuggestions),
+    ],
+  }), manualConfig(), me, NOW);
+  expect(row.description).toBe('# Motivation\nKeep this text intact.');
+  expect(row.sourceBranch).toBe('feature/improve-search');
+  expect(row.targetBranch).toBe('main');
+  expect(row.repoId).toBe('repo-guid');
+  expect(row.projectId).toBe('project-guid');
+  expect(row.reviewers).toEqual([
+    {displayName: 'Platform Infra', uniqueName: '', vote: 10, isContainer: true, isRequired: true},
+    {displayName: 'Bob', uniqueName: 'bob@co.com', vote: 5, isContainer: false, isRequired: false},
+  ]);
+});
+
+test('missing workspace metadata becomes empty strings without changing legacy section semantics', () => {
+  const sections = splitSections([pr({reviewers: [reviewer(bob, 0), reviewer(me, 0)]})], manualConfig(), me, NOW);
+  const row = sections.toReview[0]!;
+  expect(sections.assignedToYou[0]).toBe(row);
+  expect([row.description, row.sourceBranch, row.targetBranch, row.repoId, row.projectId]).toEqual(['', '', '', '', '']);
+  expect(row.reviewProgress).toEqual({voted: 0, total: 2});
+  expect(sections.filtered).toEqual({drafts: 0, bots: 0, reviewed: 0});
+});

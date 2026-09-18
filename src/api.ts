@@ -1,8 +1,10 @@
 import {getAzAccessToken, resetAzTokenCache} from './azcli.ts';
 import {effectivePat, type Config} from './config.ts';
 import {ApiError} from './errors.ts';
+import {summarizeReviewRequirements, unknownReviewRequirements, type AdoPolicyEvaluation, type ReviewRequirements} from './reviews.ts';
 
 export {ApiError} from './errors.ts';
+export type {ReviewRequirements} from './reviews.ts';
 
 const API_VERSION = '7.1';
 /** connectionData is only published as a preview API; `7.1` gets "version out of range". */
@@ -20,11 +22,13 @@ export interface AdoIdentityRef {
 export interface AdoReviewer extends AdoIdentityRef {
   vote: number;
   isContainer?: boolean;
+  isRequired?: boolean;
 }
 
 export interface AdoPullRequest {
   pullRequestId: number;
   title: string;
+  description?: string;
   creationDate: string;
   createdBy: AdoIdentityRef;
   isDraft?: boolean;
@@ -32,7 +36,7 @@ export interface AdoPullRequest {
   targetRefName?: string;
   lastMergeSourceCommit?: {commitId?: string};
   lastMergeTargetCommit?: {commitId?: string};
-  repository: {id?: string; name: string; project?: {name?: string}};
+  repository: {id?: string; name: string; project?: {id?: string; name?: string}};
   reviewers?: AdoReviewer[];
   _links?: {web?: {href?: string}};
 }
@@ -162,17 +166,23 @@ function wantsAllRepos(repos: string[]): boolean {
 }
 
 /**
- * Active PRs across every configured project, one request per project.
- * `top` exists so settings validation can ask for a single row.
+ * Active PRs across every configured project, including subsequent pages.
+ * `top=1` keeps settings validation to one request per project. Other values set
+ * the page size; pass `allPages` explicitly to override that validation shortcut.
  */
-export async function listActivePullRequests(config: Config, top = 200): Promise<TaggedPullRequest[]> {
+export async function listActivePullRequests(config: Config, top = 200, allPages = top !== 1): Promise<TaggedPullRequest[]> {
+  if (!Number.isSafeInteger(top) || top < 1) throw new ApiError(0, 'pull request page size must be a positive integer');
   const perProject = await Promise.all(
     config.projects.map(async project => {
-      const url =
-        `${DEV_HOST}/${encodeURIComponent(config.org)}/${encodeURIComponent(project)}/_apis/git/pullrequests` +
-        `?searchCriteria.status=active&$top=${top}&api-version=${API_VERSION}`;
-      const body = await apiFetch<{value?: AdoPullRequest[]}>(url, config);
-      return (body.value ?? []).map(pr => ({...pr, project}));
+      const prs = await fetchPages<AdoPullRequest>(
+        skip =>
+          `${DEV_HOST}/${encodeURIComponent(config.org)}/${encodeURIComponent(project)}/_apis/git/pullrequests` +
+          `?searchCriteria.status=active&$top=${top}&$skip=${skip}&api-version=${API_VERSION}`,
+        config,
+        top,
+        allPages,
+      );
+      return prs.map(pr => ({...pr, project}));
     }),
   );
 
@@ -181,6 +191,79 @@ export async function listActivePullRequests(config: Config, top = 200): Promise
 
   const wanted = new Set(config.repos.map(r => r.toLowerCase()));
   return all.filter(pr => wanted.has(pr.repository.name.toLowerCase()));
+}
+
+/**
+ * The list API truncates descriptions to 400 characters; this endpoint returns
+ * the individual PR, including its full description. The caller owns caching.
+ * https://learn.microsoft.com/rest/api/azure/devops/git/pull-requests/get-pull-request
+ */
+export async function getPullRequestDetails(config: Config, pr: TaggedPullRequest): Promise<TaggedPullRequest> {
+  if (!Number.isSafeInteger(pr.pullRequestId) || pr.pullRequestId < 1) {
+    throw new ApiError(0, 'the pull request has no valid ID');
+  }
+  const project = pr.repository.project?.id || pr.project;
+  const repository = pr.repository.id || pr.repository.name;
+  const url =
+    `${DEV_HOST}/${encodeURIComponent(config.org)}/${encodeURIComponent(project)}` +
+    `/_apis/git/repositories/${encodeURIComponent(repository)}/pullrequests/${pr.pullRequestId}?api-version=${API_VERSION}`;
+  const details = await apiFetch<AdoPullRequest | null>(url, config);
+  if (!details || details.pullRequestId !== pr.pullRequestId ||
+      typeof details.title !== 'string' || typeof details.creationDate !== 'string' ||
+      typeof details.createdBy?.id !== 'string' || typeof details.repository?.name !== 'string' ||
+      (details.description != null && typeof details.description !== 'string')) {
+    throw new ApiError(0, 'Azure DevOps returned invalid pull request details');
+  }
+  return {...details, project: pr.project};
+}
+
+async function fetchPages<T>(url: (skip: number) => string, config: Config, top: number, allPages = true): Promise<T[]> {
+  const values: T[] = [];
+  const seen = new Set<string>();
+  for (;;) {
+    const body = await apiFetch<{value?: T[]} | null>(url(values.length), config);
+    if (!Array.isArray(body?.value)) {
+      throw new ApiError(0, 'Azure DevOps returned an invalid list response — expected a value array');
+    }
+    const page = body.value;
+    if (page.length === 0) return values;
+    const signature = JSON.stringify(page);
+    if (seen.has(signature)) throw new ApiError(0, 'Azure DevOps repeated a page — the complete result could not be read');
+    seen.add(signature);
+    values.push(...page);
+    if (!allPages || page.length < top) return values;
+  }
+}
+
+/**
+ * Applicable, blocking review policies only; this is not overall merge readiness.
+ * Evaluations use a project GUID in the artifact, not the configured project name.
+ * https://learn.microsoft.com/rest/api/azure/devops/policy/evaluations/list
+ */
+export async function getReviewRequirements(config: Config, pr: TaggedPullRequest): Promise<ReviewRequirements> {
+  const projectId = pr.repository.project?.id;
+  if (!projectId || !/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(projectId)) {
+    return unknownReviewRequirements('The pull request has no project GUID; review policies could not be read.');
+  }
+  if (!Number.isSafeInteger(pr.pullRequestId) || pr.pullRequestId < 1) {
+    return unknownReviewRequirements('The pull request has no valid ID; review policies could not be read.');
+  }
+  const top = 100;
+  const evaluations = await fetchPages<AdoPolicyEvaluation>(
+    skip => {
+      const params = new URLSearchParams({
+        artifactId: `vstfs:///CodeReview/CodeReviewId/${projectId}/${pr.pullRequestId}`,
+        includeNotApplicable: 'true',
+        $top: String(top),
+        $skip: String(skip),
+        'api-version': '7.1-preview.1',
+      });
+      return `${DEV_HOST}/${encodeURIComponent(config.org)}/${encodeURIComponent(projectId)}/_apis/policy/evaluations?${params}`;
+    },
+    config,
+    top,
+  );
+  return summarizeReviewRequirements(pr, evaluations);
 }
 
 /** Hard cap on entries asked for per diff; anything past this is reported as "N+". */
