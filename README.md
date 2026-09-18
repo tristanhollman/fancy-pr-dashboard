@@ -1,5 +1,8 @@
 # FancyPRDashboard
 
+> [!NOTE]
+> **Vibe coded.** Built with AI assistance and shaped by real-world use and feedback.
+
 A fullscreen terminal dashboard for open Azure DevOps pull requests. It answers one
 question fast: *what needs my review right now?*
 
