@@ -1,7 +1,8 @@
 # CLAUDE.md
 
-Terminal dashboard (Ink/React on Bun) for open Azure DevOps pull requests. Currently
-scaffolding — `src/index.tsx` is a placeholder.
+Fullscreen terminal workspace (Ink/React on Bun) for open Azure DevOps pull requests.
+`src/index.tsx` selects the interactive app or legacy non-TTY JSON output;
+`src/Workspace.tsx` renders the repository, PR queue, and detail panes.
 
 ## Commands
 

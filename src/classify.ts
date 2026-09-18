@@ -24,8 +24,13 @@ export interface Progress {
 export interface Row {
   id: number;
   title: string;
+  description: string;
+  sourceBranch: string;
+  targetBranch: string;
   repo: string;
+  repoId: string;
   project: string;
+  projectId: string;
   author: string;
   webUrl: string;
   ageMs: number;
@@ -61,6 +66,7 @@ export interface ReviewerSummary {
   uniqueName: string;
   vote: number;
   isContainer: boolean;
+  isRequired: boolean;
 }
 
 export interface Sections {
@@ -153,8 +159,13 @@ export function classify(pr: TaggedPullRequest, config: Config, me: Identity, no
   return {
     id: pr.pullRequestId,
     title: pr.title,
+    description: pr.description ?? '',
+    sourceBranch: pr.sourceRefName?.replace(/^refs\/heads\//, '') ?? '',
+    targetBranch: pr.targetRefName?.replace(/^refs\/heads\//, '') ?? '',
     repo: pr.repository.name,
+    repoId: pr.repository.id ?? '',
     project: pr.project,
+    projectId: pr.repository.project?.id ?? '',
     author: pr.createdBy.displayName || pr.createdBy.uniqueName || '',
     webUrl: pullRequestWebUrl(config.org, pr),
     ageMs,
@@ -174,6 +185,7 @@ export function classify(pr: TaggedPullRequest, config: Config, me: Identity, no
       uniqueName: r.uniqueName ?? '',
       vote: r.vote,
       isContainer: r.isContainer ?? false,
+      isRequired: r.isRequired ?? false,
     })),
   };
 }

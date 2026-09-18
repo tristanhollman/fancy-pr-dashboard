@@ -8,6 +8,20 @@ export const MIN_REFRESH_SECONDS = 15;
 export type AuthMode = 'pat' | 'az-cli';
 export type TeamMode = 'manual' | 'group';
 
+export interface WorkspacePreferences {
+  showRepositories: boolean;
+  showDetails: boolean;
+  groupByRepo: boolean;
+  sort: 'newest' | 'oldest';
+  hideReviewed: boolean;
+  hideComplete: boolean;
+  hideMyDrafts: boolean;
+  hideMyBots: boolean;
+  repoWidth: number;
+  listShare: number;
+  mouseEnabled: boolean;
+}
+
 export interface Config {
   version: number;
   org: string;
@@ -31,6 +45,7 @@ export interface Config {
     members: string[];
   };
   ui: {
+    workspace: WorkspacePreferences;
     hideReviewed: boolean;
     dedupeAssignedFromTeamSection: boolean;
     refreshSeconds: number;
@@ -54,6 +69,22 @@ export interface LoadResult {
   error?: string;
 }
 
+export function defaultWorkspacePreferences(): WorkspacePreferences {
+  return {
+    showRepositories: true,
+    showDetails: true,
+    groupByRepo: true,
+    sort: 'newest',
+    hideReviewed: true,
+    hideComplete: true,
+    hideMyDrafts: false,
+    hideMyBots: true,
+    repoWidth: 22,
+    listShare: 0.42,
+    mouseEnabled: true,
+  };
+}
+
 export function defaultConfig(): Config {
   return {
     version: CONFIG_VERSION,
@@ -63,6 +94,7 @@ export function defaultConfig(): Config {
     auth: {mode: 'pat', pat: null, tenant: null},
     team: {mode: 'manual', groupDescriptor: null, groupDisplayName: null, members: []},
     ui: {
+      workspace: defaultWorkspacePreferences(),
       hideReviewed: false,
       dedupeAssignedFromTeamSection: true,
       refreshSeconds: 45,
@@ -144,6 +176,8 @@ export function normalize(raw: unknown): Config {
   const auth = isRecord(raw.auth) ? raw.auth : {};
   const team = isRecord(raw.team) ? raw.team : {};
   const ui = isRecord(raw.ui) ? raw.ui : {};
+  const workspace = isRecord(ui.workspace) ? ui.workspace : {};
+  const defaults = base.ui.workspace;
 
   return {
     version: typeof raw.version === 'number' ? raw.version : base.version,
@@ -162,6 +196,23 @@ export function normalize(raw: unknown): Config {
       members: strArray(team.members, base.team.members),
     },
     ui: {
+      workspace: {
+        showRepositories: bool(workspace.showRepositories, defaults.showRepositories),
+        showDetails: bool(workspace.showDetails, defaults.showDetails),
+        groupByRepo: bool(workspace.groupByRepo, defaults.groupByRepo),
+        sort: workspace.sort === 'oldest' ? 'oldest' : defaults.sort,
+        // Preserve an explicit old preference, including false, only until migrated.
+        hideReviewed: bool(
+          workspace.hideReviewed,
+          workspace.hideReviewed === undefined ? bool(ui.hideReviewed, defaults.hideReviewed) : defaults.hideReviewed,
+        ),
+        hideComplete: bool(workspace.hideComplete, defaults.hideComplete),
+        hideMyDrafts: bool(workspace.hideMyDrafts, defaults.hideMyDrafts),
+        hideMyBots: bool(workspace.hideMyBots, defaults.hideMyBots),
+        repoWidth: Math.round(bounded(workspace.repoWidth, defaults.repoWidth, 16, 36)),
+        listShare: bounded(workspace.listShare, defaults.listShare, 0.1, 0.9),
+        mouseEnabled: bool(workspace.mouseEnabled, defaults.mouseEnabled),
+      },
       hideReviewed: typeof ui.hideReviewed === 'boolean' ? ui.hideReviewed : base.ui.hideReviewed,
       dedupeAssignedFromTeamSection:
         typeof ui.dedupeAssignedFromTeamSection === 'boolean'
@@ -183,6 +234,14 @@ export function clampRefresh(value: unknown, fallback = 45): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function bool(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function bounded(value: unknown, fallback: number, min: number, max: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
 }
 
 function str(value: unknown, fallback: string): string {

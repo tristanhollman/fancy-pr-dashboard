@@ -2,7 +2,7 @@ import React from 'react';
 import {afterEach, beforeEach, expect, test} from 'bun:test';
 import {render} from 'ink-testing-library';
 import Settings, {type ValidationFailure} from './Settings.tsx';
-import {defaultConfig, type Config} from './config.ts';
+import {defaultConfig, defaultWorkspacePreferences, type Config} from './config.ts';
 
 const ENTER = '\r';
 const TAB = '\t';
@@ -432,5 +432,238 @@ test('an az failure is pinned to the auth mode field, not to the PAT', async () 
 
   expect(lastFrame()).toContain('az login');
 
+  unmount();
+});
+
+test('workspace toggles remain visible while scrolling and save independently from JSON filters', async () => {
+  const config = usableConfig();
+  config.ui.hideReviewed = true;
+  let written: Config | undefined;
+  let saved: Config | undefined;
+  const {lastFrame, stdin, unmount} = render(
+    <Settings config={config} columns={100} height={10} onSave={next => { saved = next; }}
+      validate={async () => null} save={async next => { written = next; }} />,
+  );
+  const labels = [
+    'show repositories', 'show details', 'group by repository', 'sort by date',
+    'hide my reviewed (queue)', 'hide required-complete', 'mouse input',
+  ];
+
+  stdin.write(TAB); // Auth
+  stdin.write(TAB); // Team
+  stdin.write(TAB); // Workspace
+  await settle();
+  for (const label of labels) {
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain(`› ${label}`);
+    expect(frame.split('\n')).toHaveLength(10);
+    expect(frame.split('\n')[0]).toContain('settings');
+    expect(frame.split('\n').at(-1)).toContain('s save');
+    expect(frame.split('\n').every(line => line.length <= 100)).toBe(true);
+    stdin.write(ENTER);
+    await settle();
+    stdin.write('j');
+    await settle();
+  }
+  expect(lastFrame()).toContain('› reset pane geometry');
+  expect(lastFrame()).not.toContain('organization');
+  stdin.write('s');
+  await settle();
+  expect(saved?.ui.workspace).toEqual({
+    ...defaultWorkspacePreferences(), showRepositories: false, showDetails: false, groupByRepo: false,
+    sort: 'oldest', hideReviewed: false, hideComplete: false, mouseEnabled: false,
+  });
+  expect(saved?.ui.hideReviewed).toBe(true);
+  expect(written).toEqual(saved);
+
+  for (let i = 0; i < 14; i++) stdin.write('k');
+  await settle();
+  expect(lastFrame()).toContain('› organization');
+  expect(lastFrame()?.split('\n')).toHaveLength(10);
+  unmount();
+});
+
+test('reset pane geometry restores widths without changing filters, panes, ordering or mouse preference', async () => {
+  const config = usableConfig();
+  config.ui.workspace = {
+    ...defaultWorkspacePreferences(),
+    showRepositories: false, showDetails: false, groupByRepo: false, sort: 'oldest',
+    hideReviewed: false, hideComplete: false, repoWidth: 33, listShare: 0.7, mouseEnabled: false,
+  };
+  let saved: Config | undefined;
+  const {lastFrame, stdin, unmount} = render(
+    <Settings config={config} height={8} onSave={next => { saved = next; }}
+      validate={async () => null} save={async () => {}} />,
+  );
+  for (let i = 0; i < 3; i++) stdin.write(TAB);
+  for (let i = 0; i < 7; i++) stdin.write('j');
+  await settle();
+  expect(lastFrame()).toContain('› reset pane geometry');
+  expect(lastFrame()).toContain('33 cols · 70% list');
+  stdin.write(ENTER);
+  await settle();
+  expect(lastFrame()).toContain('22 cols · 42% list');
+  stdin.write(CTRL_S);
+  await settle();
+  expect(saved?.ui.workspace).toEqual({...config.ui.workspace, repoWidth: 22, listShare: 0.42});
+  expect(saved?.ui.hideReviewed).toBe(config.ui.hideReviewed);
+  expect(config.ui.workspace.repoWidth).toBe(33);
+  unmount();
+});
+
+test('keyboard reaches every field in a small terminal and wraps groups without losing fixed chrome', async () => {
+  const {lastFrame, stdin, unmount} = render(
+    <Settings config={usableConfig()} columns={60} height={7} onSave={() => {}}
+      validate={async () => null} save={async () => {}} />,
+  );
+  const labels = [
+    'organization', 'projects', 'repos', 'mode', 'personal access token', 'mode', 'members',
+    'show repositories', 'show details', 'group by repository', 'sort by date', 'hide my reviewed (queue)',
+    'hide required-complete', 'mouse input', 'reset pane geometry', 'hide my drafts', 'hide my bot-authored PRs',
+    'JSON-only hide reviewed', 'dedupe assigned from team', 'hide drafts', 'hide bot authors', 'bot authors', 'refresh seconds',
+  ];
+  for (const label of labels) {
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain(`› ${label}`);
+    expect(frame.split('\n')).toHaveLength(7);
+    expect(frame.split('\n')[0]).toContain('settings');
+    expect(frame.split('\n').at(-1)).toContain('s save');
+    expect(frame.split('\n').every(line => line.length <= 60)).toBe(true);
+    stdin.write('\u001b[B');
+    await settle();
+  }
+  stdin.write(TAB);
+  await settle();
+  expect(lastFrame()).toContain('› organization');
+  unmount();
+});
+
+test('terminal resize preserves the selected setting without vertical or horizontal overflow', async () => {
+  const config = usableConfig();
+  config.org = 'a-very-long-organization-name-that-must-not-wrap-over-other-fields';
+  const {lastFrame, stdin, stdout, unmount} = render(
+    <Settings config={config} onSave={() => {}} validate={async () => null} save={async () => {}} />,
+  );
+  for (let i = 0; i < 3; i++) stdin.write(TAB);
+  for (let i = 0; i < 7; i++) stdin.write('j');
+  await settle();
+  for (const height of [8, 5, 18]) {
+    Object.defineProperty(stdout, 'rows', {value: height, configurable: true});
+    Object.defineProperty(stdout, 'columns', {value: 48, configurable: true});
+    stdout.emit('resize');
+    await settle();
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('› reset pane geometry');
+    expect(frame.split('\n')).toHaveLength(height);
+    expect(frame.split('\n').every(line => line.length <= 48)).toBe(true);
+    expect(frame.split('\n')[0]).toContain('settings');
+    expect(frame.split('\n').at(-1)).toContain('s save');
+  }
+  for (let i = 0; i < 14; i++) stdin.write('k');
+  await settle();
+  stdin.write(ENTER);
+  await settle();
+  stdin.write('more-text-to-edit-without-wrapping');
+  await settle();
+  expect(lastFrame()).toContain('› organization');
+  expect(lastFrame()?.split('\n').every(line => line.length <= 48)).toBe(true);
+  expect(lastFrame()?.split('\n')).toHaveLength(18);
+  unmount();
+});
+
+test('validation scrolls a hidden failing field into view', async () => {
+  const {lastFrame, stdin, unmount} = render(
+    <Settings config={usableConfig()} columns={80} height={8} onSave={() => {}}
+      validate={async () => ({field: 'auth.pat', message: 'authentication rejected'})} save={async () => {}} />,
+  );
+  for (let i = 0; i < 4; i++) stdin.write(TAB);
+  await settle();
+  expect(lastFrame()).not.toContain('personal access token');
+  stdin.write('s');
+  await settle();
+  expect(lastFrame()).toContain('› personal access token');
+  expect(lastFrame()).toContain('authentication rejected');
+  expect(lastFrame()?.split('\n')).toHaveLength(8);
+  unmount();
+});
+
+test('My PRs settings save independently of shared draft and bot filters', async () => {
+  const config = usableConfig();
+  let saved: Config | undefined;
+  const {stdin, lastFrame, unmount} = render(<Settings config={config} columns={100} height={12}
+    onSave={value => { saved = value; }} validate={async () => null} save={async () => {}} />);
+  try {
+    for (let i = 0; i < 4; i++) stdin.write(TAB);
+    await settle();
+    expect(lastFrame()).toContain('MY PRS');
+    expect(lastFrame()).toContain('› hide my drafts');
+    stdin.write(ENTER);
+    await settle();
+    stdin.write('j');
+    await settle();
+    expect(lastFrame()).toContain('› hide my bot-authored PRs');
+    stdin.write(ENTER);
+    await settle();
+    stdin.write('s');
+    await settle();
+    expect(saved?.ui.workspace.hideMyDrafts).toBe(true);
+    expect(saved?.ui.workspace.hideMyBots).toBe(false);
+    expect(saved?.ui.hideDrafts).toBe(config.ui.hideDrafts);
+    expect(saved?.ui.hideBots).toBe(config.ui.hideBots);
+  } finally {
+    unmount();
+  }
+});
+
+test('large reviewer group pickers scroll the selected group and retain keyboard workflow', async () => {
+  const config = usableConfig();
+  config.team.mode = 'group';
+  let saved: Config | undefined;
+  const {lastFrame, stdin, unmount} = render(
+    <Settings config={config} height={8} onSave={next => { saved = next; }}
+      validate={async () => null} save={async () => {}}
+      findGroups={async () => Array.from({length: 30}, (_, i) => ({
+        descriptor: `group-${i}`, displayName: `Reviewer Team ${i}`, prCount: i + 1,
+      }))} />,
+  );
+  stdin.write(TAB);
+  stdin.write(TAB);
+  stdin.write('j');
+  await settle();
+  stdin.write(ENTER);
+  await settle();
+  for (let i = 0; i < 29; i++) stdin.write('j');
+  await settle();
+  expect(lastFrame()).toContain('› Reviewer Team 29');
+  expect(lastFrame()).not.toContain('Reviewer Team 0');
+  expect(lastFrame()?.split('\n')).toHaveLength(8);
+  expect(lastFrame()?.split('\n').at(-1)).toContain('esc back');
+  stdin.write(ENTER);
+  await settle();
+  stdin.write('s');
+  await settle();
+  expect(saved?.team.groupDescriptor).toBe('group-29');
+  unmount();
+});
+
+test('q remains ordinary text while editing and is not a new settings quit shortcut', async () => {
+  let cancels = 0;
+  let saved: Config | undefined;
+  const {stdin, unmount} = render(
+    <Settings config={usableConfig()} onSave={next => { saved = next; }} onCancel={() => { cancels++; }}
+      validate={async () => null} save={async () => {}} />,
+  );
+  stdin.write('q');
+  await settle();
+  expect(cancels).toBe(0);
+  stdin.write(ENTER);
+  await settle();
+  stdin.write('q');
+  await settle();
+  stdin.write(ENTER);
+  await settle();
+  stdin.write('s');
+  await settle();
+  expect(saved?.org).toBe('myorgq');
   unmount();
 });
