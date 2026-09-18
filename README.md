@@ -1,3 +1,5 @@
+![FancyPRDashboard: Less hunting. More reviewing.](docs/assets/banner.png)
+
 # FancyPRDashboard
 
 > [!NOTE]
@@ -13,7 +15,7 @@ list, and a description-first inspector share the terminal.
 The terminal tab is renamed to the live counts (`fpr · 5 to review · 1 mine`) and put
 back the way it was on exit.
 
-> **Status: usable.** The workspace supports keyboard navigation, search, repository
+> **Status: V1 released.** The workspace supports keyboard navigation, search, repository
 > filters, saved layouts, review requirements, auto-refresh, and mouse resizing in
 > terminals supporting SGR mouse reporting.
 
@@ -303,27 +305,36 @@ bun run scripts/smoke-release.ts
 host platform's binary with an isolated empty config and no inherited credentials.
 CI builds and runs this startup check natively on Linux and Windows.
 
-After the release PR has passed CI and been merged into `master`, perform an interactive
+For subsequent releases, update `package.json` and `CHANGELOG.md` first; artifact names
+follow the package version. After the release PR has passed CI and been merged into `master`, perform an interactive
 Windows Terminal smoke test: settings, tab/search restoration, resizing, optional mouse
 dragging, opening a PR, and clean terminal restoration on exit. Review the notes in
-[`CHANGELOG.md`](CHANGELOG.md). Then create and push `v1.0.0` on the merged commit.
+[`CHANGELOG.md`](CHANGELOG.md). Then create and push the matching `v<version>` tag on the merged commit.
 The release workflow requires the tag to match `package.json` and its commit to be on
 `master`; it builds both binaries, attaches checksums, and creates a **draft release**.
-Review the draft and publish it manually. Preparing this branch does not tag or publish.
+Review the draft and publish it manually. Running the local build commands does not tag or publish.
 
 ## Roadmap
 
-1. ~~Config load/save, `api.ts` fetch wrapper with PAT auth~~
-2. ~~Settings screen (the only way to configure the app)~~
-3. ~~Data layer: fetch PRs, reviewer classification, identity resolution~~
-4. ~~Render the three sections~~
-5. ~~Keyboard navigation, filters, open-in-browser, fullscreen frame~~
-6. ~~Reviewer group picker in settings~~
-7. ~~Non-TTY JSON output~~
-8. ~~`az` CLI auth mode~~
-9. ~~Auto-refresh on `ui.refreshSeconds`~~
-10. ~~Versioned Linux/Windows artifacts and draft-release automation~~
-11. Publish the reviewed `1.0.0` draft after merging and completing platform smoke checks
+**[V1.0.0 shipped on September 18, 2026.](https://github.com/tristanhollman/fancy-pr-dashboard/releases/tag/v1.0.0)**
+
+### Delivered in V1
+
+- [x] In-app configuration, PAT and Azure CLI authentication, and reviewer group selection.
+- [x] Fullscreen workspace with Team queue, Assigned to me, My PRs, and All open.
+- [x] Optional repository sidebar, resizable panes, and a full-description PR inspector.
+- [x] Search, repository grouping or global date sorting, visible authors, and keyboard/mouse navigation.
+- [x] Review-policy completion, queue-only review filters, and independent My PRs draft/bot preferences.
+- [x] Saved layouts and filters, settings-context restoration, and responsive terminal layouts.
+- [x] Stable auto-refresh, cached data on errors, and identity-based PR selection.
+- [x] Legacy non-TTY JSON output.
+- [x] Published Linux/Windows executables, checksums, CI, and draft-release automation.
+
+### After V1
+
+Next priorities will follow real-world usage: bug fixes, terminal compatibility, and
+usability improvements. No additional feature milestones are scheduled yet; track
+feedback and proposals in [Issues](https://github.com/tristanhollman/fancy-pr-dashboard/issues).
 
 ## License
 
